@@ -183,6 +183,28 @@ vanish sock = do
     sent <- send sock msg
     sockSuccess sock
 
+sync sock = do
+    let msg = toStrict . runPut $ (put C.magic >> put C.sync)
+    sent <- send sock msg
+    sockSuccess sock
+
+copy sock path = do
+    let pathLen = length32 path
+    let msg = toStrict . runPut $ (put C.magic >> put C.copy >> put pathLen >> putLazyByteString path)
+    sent <- send sock msg
+    sockSuccess sock
+
+addInt sock key x = do
+    let wx = (fromIntegral x)::Int32
+    let klen = length32 key
+    let msg = toStrict . runPut $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
+    sent <- send sock msg
+    fetch <- recv sock 5
+    let (code, thesum) = BG.runGet getGet $ toLazy fetch
+    case code of
+        0 -> return $ Just thesum
+        _ -> return Nothing
+
 main = do
     let k = LS.pack "hab"
     let v = LS.pack "blab"
@@ -216,7 +238,15 @@ main = do
     print valSize
     let keys = [LS.pack "yex", LS.pack "one", k]
     pairs <- mget s keys
-    areTheyGone <- vanish s
-    print areTheyGone
+    let outPath = LS.pack "/home/travis/hogo.tch"
+    copyConfirm <- copy s outPath
+    print copyConfirm
+    print "copied"
+    --areTheyGone <- vanish s
+    let k3 = LS.pack "dude"
+    let v3 = runPut $ put (0::Int32)
+    pd <- putValue s k3 v3
+    zap <- getValue s k3
+    jungle <- addInt s k3 (20::Int)
     sClose s
-    return pairs
+    return jungle
