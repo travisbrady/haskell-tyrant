@@ -241,6 +241,17 @@ sizeOrRNum sock cmdId = do
 size sock = sizeOrRNum sock C.size
 rnum sock = sizeOrRNum sock C.rnum
 
+stat sock = do
+    sent <- send sock $ toStrict . runPut $ (put C.magic >> put C.stat)
+    resHeader <- recv sock 5
+    let (code, ssiz) = BG.runGet getGet $ toLazy resHeader
+    case code of
+        0 -> do
+            rawStat <- recv sock ssiz
+            let statPairs = map (S.split '\t') $ S.lines rawStat
+            return $ Just statPairs
+        _ -> return Nothing
+
 main = do
     let k = LS.pack "hab"
     let v = LS.pack "blab"
@@ -285,5 +296,6 @@ main = do
     jungle <- addInt s k3 (20::Int)
     sz <- size s
     numrecs <- rnum s
+    stats <- stat s
     sClose s
-    return numrecs
+    return stats
