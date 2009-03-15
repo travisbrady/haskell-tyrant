@@ -75,13 +75,9 @@ openConnect hostname port = do
 
 putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putValue sock key value = do
-    --let metaData = runPut $ makePut key value
-    --let msg = toStrict $ LS.concat [metaData, key, value]
     let msg = runPS $ makePut key value
     res <- send sock msg
-    ret <- recv sock 1
-    let retCode = BG.runGet getRetCode (toLazy ret)
-    return $ retCode == 0
+    sockSuccess sock
 
 putIntValue :: (Num a, Integral a) => Socket -> LS.ByteString -> a -> IO Bool
 putIntValue sock key value = do
@@ -121,23 +117,15 @@ getInt sock key = do
 
 putKeep :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putKeep sock key value = do
-    --let metaData = runPut $ makePutKeep key value
-    --let msg = toStrict $ LS.concat [metaData, key, value]
     let msg = runPS $ makePutKeep key value
     res <- send sock msg
-    ret <- recv sock 1
-    let retCode = BG.runGet getRetCode (toLazy ret)
-    return $ retCode == 0
+    sockSuccess sock
 
 putCat :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putCat sock key value = do
-    --let metaData = runPut $ makePutCat key value
-    --let msg = toStrict $ LS.concat [metaData, key, value]
     let msg = runPS $ makePutCat key value
     sent <- send sock msg
-    rawRetCode <- recv sock 1
-    let retCode = BG.runGet getRetCode (toLazy rawRetCode)
-    return $ retCode == 0
+    sockSuccess sock
 
 sockSuccess :: Socket -> IO Bool
 sockSuccess sock = do
