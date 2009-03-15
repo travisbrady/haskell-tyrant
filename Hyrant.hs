@@ -19,6 +19,8 @@ length32 s = fromIntegral $ LS.length s
 len32 :: [a] -> Int32
 len32 lst = fromIntegral $ length lst
 
+runPS = toStrict . runPut
+
 makeVsiz :: LS.ByteString -> Put
 makeVsiz key = do
     put C.magic
@@ -40,6 +42,7 @@ makePuts code key value = do
     let klen = length32 key
     let vlen = length32 value
     put klen >> put vlen
+    putLazyByteString key >> putLazyByteString value
 
 makePut :: LS.ByteString -> LS.ByteString -> Put
 makePut key value = makePuts C.put key value
@@ -66,17 +69,25 @@ openConnect hostname port = do
     addrinfos <- getAddrInfo Nothing (Just hostname) (Just port)
     let addr = head addrinfos
     sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+    setSocketOption sock NoDelay 1
     connect sock (addrAddress addr)
     return sock
 
 putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putValue sock key value = do
-    let metaData = runPut $ makePut key value
-    let msg = toStrict $ LS.concat [metaData, key, value]
+    --let metaData = runPut $ makePut key value
+    --let msg = toStrict $ LS.concat [metaData, key, value]
+    let msg = runPS $ makePut key value
     res <- send sock msg
     ret <- recv sock 1
     let retCode = BG.runGet getRetCode (toLazy ret)
     return $ retCode == 0
+
+putIntValue :: (Num a, Integral a) => Socket -> LS.ByteString -> a -> IO Bool
+putIntValue sock key value = do
+    let vi32 = (fromIntegral value)::Int32
+    let vbs = runPut $ put vi32
+    putValue sock key vbs
 
 getValue :: Socket -> LS.ByteString -> IO (Maybe LS.ByteString)
 getValue sock key = do
@@ -110,8 +121,9 @@ getInt sock key = do
 
 putKeep :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putKeep sock key value = do
-    let metaData = runPut $ makePutKeep key value
-    let msg = toStrict $ LS.concat [metaData, key, value]
+    --let metaData = runPut $ makePutKeep key value
+    --let msg = toStrict $ LS.concat [metaData, key, value]
+    let msg = runPS $ makePutKeep key value
     res <- send sock msg
     ret <- recv sock 1
     let retCode = BG.runGet getRetCode (toLazy ret)
@@ -119,8 +131,9 @@ putKeep sock key value = do
 
 putCat :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putCat sock key value = do
-    let metaData = runPut $ makePutCat key value
-    let msg = toStrict $ LS.concat [metaData, key, value]
+    --let metaData = runPut $ makePutCat key value
+    --let msg = toStrict $ LS.concat [metaData, key, value]
+    let msg = runPS $ makePutCat key value
     sent <- send sock msg
     rawRetCode <- recv sock 1
     let retCode = BG.runGet getRetCode (toLazy rawRetCode)
@@ -297,5 +310,8 @@ main = do
     sz <- size s
     numrecs <- rnum s
     stats <- stat s
+    let k4 = LS.pack "xxx"
+    let v4 = 9
+    pti <- putIntValue s k4 v4
     sClose s
     return stats
