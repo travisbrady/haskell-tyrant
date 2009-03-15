@@ -140,7 +140,6 @@ mget sock keys = do
     hdr <- recv sock 5
     let (code, rnum) = BG.runGet getGet $ toLazy hdr
     pairs <- getManyMGet sock rnum []
-    print pairs
     return pairs
 
 makeMGet keys = do
@@ -167,8 +166,8 @@ getMGetHeader = do
     return (ksize, vsize)
     
 getOneMGet ksize vsize = do
-    k <- BG.getByteString ksize
-    v <- BG.getByteString vsize
+    k <- BG.getLazyByteString $ toEnum ksize
+    v <- BG.getLazyByteString $ toEnum vsize
     return (k, v)
 
 getGet = do
@@ -178,6 +177,11 @@ getGet = do
     ln <- BG.getWord32be
     let len = (fromEnum ln)::Int
     return (code, len)
+
+vanish sock = do
+    let msg = toStrict . runPut $ (put C.magic >> put C.vanish)
+    sent <- send sock msg
+    sockSuccess sock
 
 main = do
     let k = LS.pack "hab"
@@ -212,5 +216,7 @@ main = do
     print valSize
     let keys = [LS.pack "yex", LS.pack "one", k]
     pairs <- mget s keys
+    areTheyGone <- vanish s
+    print areTheyGone
     sClose s
     return pairs
