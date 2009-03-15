@@ -91,6 +91,23 @@ getValue sock key = do
             return $ Just (toLazy rawValue)
         _ -> return Nothing
 
+blah = do
+    b <- BG.getWord32be
+    return b
+
+getInt sock key = do
+    let metaData = runPut $ makeGet key
+    let msg = toStrict $ LS.concat [metaData, key]
+    res <- send sock msg
+    fetch <- recv sock 5
+    let (code, valLen) = BG.runGet getGet $ toLazy fetch
+    case code of
+        0 -> do
+            rawValue <- recv sock valLen
+            let v = BG.runGet blah $ toLazy rawValue
+            return $ Just v
+        _ -> return Nothing
+
 putKeep :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putKeep sock key value = do
     let metaData = runPut $ makePutKeep key value
@@ -205,6 +222,25 @@ addInt sock key x = do
         0 -> return $ Just thesum
         _ -> return Nothing
 
+parseSize = do
+    rawcode <- BG.getWord8
+    let code = (fromEnum rawcode)::Int
+    rawSize <- BG.getWord64be
+    let size = (fromEnum rawSize)::Int
+    return (code, size)
+
+sizeOrRNum sock cmdId = do
+    let msg = toStrict . runPut $ (put C.magic >> put cmdId)
+    sent <- send sock msg
+    fetch <- recv sock 9
+    let (code, siz) = BG.runGet parseSize $ toLazy fetch
+    case code of
+        0 -> return $ Just siz
+        _ -> return Nothing
+
+size sock = sizeOrRNum sock C.size
+rnum sock = sizeOrRNum sock C.rnum
+
 main = do
     let k = LS.pack "hab"
     let v = LS.pack "blab"
@@ -241,12 +277,13 @@ main = do
     let outPath = LS.pack "/home/travis/hogo.tch"
     copyConfirm <- copy s outPath
     print copyConfirm
-    print "copied"
     --areTheyGone <- vanish s
     let k3 = LS.pack "dude"
     let v3 = runPut $ put (0::Int32)
     pd <- putValue s k3 v3
     zap <- getValue s k3
     jungle <- addInt s k3 (20::Int)
+    sz <- size s
+    numrecs <- rnum s
     sClose s
-    return jungle
+    return numrecs
