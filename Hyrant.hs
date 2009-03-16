@@ -24,26 +24,23 @@ runPS = toStrict . runPut
 
 makeVsiz :: LS.ByteString -> Put
 makeVsiz key = do
-    put C.magic
-    put C.vsiz
-    let klen = length32 key
-    put klen
+    put C.magic >> put C.vsiz
+    put klen >> putLazyByteString key
+    where klen = length32 key
 
 makeOut :: LS.ByteString -> Put
 makeOut key = do
     put C.magic >> put C.out
-    let klen = length32 key
-    put klen
-    putLazyByteString key
+    put klen >> putLazyByteString key
+    where klen = length32 key
 
 makePuts :: Word8 -> LS.ByteString -> LS.ByteString -> Put
 makePuts code key value = do
-    put C.magic
-    put code
-    let klen = length32 key
-    let vlen = length32 value
+    put C.magic >> put code
     put klen >> put vlen
     putLazyByteString key >> putLazyByteString value
+    where klen = length32 key
+          vlen = length32 value
 
 makePut :: LS.ByteString -> LS.ByteString -> Put
 makePut key value = makePuts C.put key value
@@ -56,9 +53,8 @@ makePutCat key value = makePuts C.putcat key value
 
 makeGet :: LS.ByteString -> Put
 makeGet key = do
-    put C.magic
-    put C.get
-    put (length32 key)
+    put C.magic >> put C.get
+    put (length32 key) >> putLazyByteString key
 
 getRetCode = do
     rawCode <- BG.getWord8
@@ -88,8 +84,7 @@ putIntValue sock key value = do
 
 getValue :: Socket -> LS.ByteString -> IO (Maybe LS.ByteString)
 getValue sock key = do
-    let metaData = runPut $ makeGet key
-    let msg = toStrict $ LS.concat [metaData, key]
+    let msg = runPS $ makeGet key
     res <- send sock msg
     fetch <- recv sock 5
     let (code, valLen) = BG.runGet getGet $ toLazy fetch
@@ -131,8 +126,9 @@ out sock key = do
 
 vsiz :: Socket -> LS.ByteString -> IO (Maybe Int)
 vsiz sock key = do
-    let metaData = runPut $ makeVsiz key
-    let msg = toStrict $ LS.concat [metaData, key]
+    --let metaData = runPut $ makeVsiz key
+    --let msg = toStrict $ LS.concat [metaData, key]
+    let msg = runPS $ makeVsiz key
     res <- send sock msg
     fetch <- recv sock 5
     let (code, valLen) = BG.runGet getGet $ toLazy fetch
@@ -267,9 +263,9 @@ parseAddDoubleReponse = do
 
 doublePut key integ fract = do
     put C.magic >> put C.adddouble
-    let klen = length32 key
     put klen >> put integ >> put fract
     putLazyByteString key
+    where klen = length32 key
 
 adddouble sock key num = do
     let (integ, fract) = integFract num
