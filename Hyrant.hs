@@ -253,6 +253,13 @@ stat sock = do
             return $ Just statPairs
         _ -> return Nothing
 
+restore sock path ts = do
+    let pl = length32 path
+    let ts64 = (fromIntegral ts)::Int64
+    let restorePut = (put C.magic >> put C.restore >> put pl >> put ts64 >> putLazyByteString path)
+    sent <- send sock $ runPS restorePut
+    sockSuccess sock
+
 main = do
     let k = LS.pack "hab"
     let v = LS.pack "blab"
