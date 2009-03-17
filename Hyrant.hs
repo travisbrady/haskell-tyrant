@@ -200,23 +200,22 @@ justCode sock code = do
 
 copy sock path = do
     let msg = runPS $ oneValPut path
-    --let pathLen = length32 path
-    --let msg = toStrict . runPut $ (put C.magic >> put C.copy >> put pathLen >> putLazyByteString path)
     sent <- send sock msg
     sockSuccess sock
 
 addInt sock key x = do
     let wx = (fromIntegral x)::Int32
     let klen = length32 key
-    let msg = toStrict . runPut $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
+    let msg = runPS $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
     sent <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
-    fetch <- recv sock 5
-    let (code, thesum) = BG.runGet getGet $ toLazy fetch
     case code of
-        0 -> return $ Just thesum
-        _ -> return Nothing
+        0 -> do
+            sumraw <- recv sock 4
+            let thesum = parseLen sumraw
+            return $ Right thesum
+        x -> return $ Left $ errorCode x
 
 parseSize = do
     rawcode <- BG.getWord8
@@ -226,13 +225,16 @@ parseSize = do
     return (code, size)
 
 sizeOrRNum sock cmdId = do
-    let msg = toStrict . runPut $ (put C.magic >> put cmdId)
+    let msg = runPS $ (put C.magic >> put cmdId)
     sent <- send sock msg
-    fetch <- recv sock 9
-    let (code, siz) = BG.runGet parseSize $ toLazy fetch
+    rc <- recv sock 1
+    let code = parseRetCode rc
     case code of
-        0 -> return $ Just siz
-        _ -> return Nothing
+        0 -> do
+            sizeraw <- recv sock 8
+            let size = BG.runGet parseSize $ toLazy sizeraw
+            return $ Right size
+        x -> return $ Left $ errorCode x
 
 size sock = sizeOrRNum sock C.size
 rnum sock = sizeOrRNum sock C.rnum
@@ -455,7 +457,6 @@ main = do
     -- Try to fetch value which we've just killed, should be Nothing
     zoop2 <- getValue s k2
     print zoop2
-    print "HIHIHIHIHIHI"
     valSize <- vsiz s k
     print valSize
     let keys = [LS.pack "yex", LS.pack "one", k]
