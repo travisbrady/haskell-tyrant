@@ -363,18 +363,17 @@ fwmkeys sock prefix maxKeys = do
             knumRaw <- recv sock 4
             --let knum = BG.runGet parseLen $ toLazy knumRaw
             let knum = parseLen knumRaw
-            theKeys <- getManyfwmkeys sock knum []
+            theKeys <- getManyElements sock knum []
             return $ Right theKeys
         x -> return $ Left $ errorCode x
 
-getManyfwmkeys _ 0 acc = return acc
-getManyfwmkeys sock knum acc = do
+getManyElements _ 0 acc = return acc
+getManyElements sock knum acc = do
     klenRaw <- recv sock 4
-    --let klen = BG.runGet parseLen $ toLazy klenRaw
     let klen = parseLen klenRaw
     keyRaw <- recv sock klen
     let key = BG.runGet (BG.getLazyByteString $ toEnum klen) $ toLazy keyRaw
-    getManyfwmkeys sock (knum-1) (key:acc)
+    getManyElements sock (knum-1) (key:acc)
     
 extPut funcname key value opts = do
     put C.magic >> put C.ext
@@ -404,6 +403,27 @@ ext sock funcname key value opts = do
             rbuf <- recv sock rsiz
             let result = readLazy rsiz rbuf
             return $ Right result
+        x -> return $ Left $ errorCode x
+
+miscPut funcname args opts = do
+    put C.magic >> put C.misc
+    put nlen >> put opts >> put rnum
+    putLazyByteString funcname
+    mapM_ (\arg -> put (length32 arg) >> putLazyByteString arg) args
+    where nlen = length32 funcname
+          rnum = len32 args
+
+misc sock funcname args opts = do
+    let msg = runPS $ miscPut funcname args $ optOr opts
+    sent <- send sock msg
+    rc <- recv sock 1
+    let rcp = parseCode rc
+    case rcp of
+        0 -> do
+            rnumRaw <- recv sock 4
+            let rnum = parseLen rnumRaw
+            elements <- getManyElements sock rnum []
+            return $ Right elements
         x -> return $ Left $ errorCode x
 
 main = do
