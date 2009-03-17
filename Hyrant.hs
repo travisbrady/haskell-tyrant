@@ -79,27 +79,32 @@ openConnect hostname port = do
     connect sock (addrAddress addr)
     return sock
 
---putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
+parseRetCode = BG.runGet getRetCode . toLazy
+putValue :: Socket
+            -> LS.ByteString
+            -> LS.ByteString
+            -> IO (Either [Char] Bool)
 putValue sock key value = do
     let msg = runPS $ makePut key value
     res <- send sock msg
-    rawRetCode <- recv sock 1
-    let retCode = BG.runGet getRetCode $ toLazy rawRetCode
+    rc <- recv sock 1
+    let retCode = parseRetCode rc
     case retCode of
         0 -> return $ Right True
         x -> return $ Left $ errorCode x
 
-getValue :: Socket -> LS.ByteString -> IO (Maybe LS.ByteString)
 getValue sock key = do
     let msg = runPS $ makeGet key
     res <- send sock msg
-    fetch <- recv sock 5
-    let (code, valLen) = BG.runGet getGet $ toLazy fetch
+    rc <- recv sock 1
+    let code = parseRetCode rc
     case code of
         0 -> do
+            vl <- recv sock 4
+            let valLen = parseLen vl
             rawValue <- recv sock valLen
-            return $ Just (toLazy rawValue)
-        _ -> return Nothing
+            return $ Right $ toLazy rawValue
+        x -> return $ Left $ errorCode x
 
 getDouble sock key = do 
     adddouble sock key 0.0
@@ -107,57 +112,56 @@ getDouble sock key = do
 getInt sock key = do
     addInt sock key 0
 
-putKeep :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putKeep sock key value = do
     let msg = runPS $ makePutKeep key value
     res <- send sock msg
     sockSuccess sock
 
-putCat :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putCat sock key value = do
     let msg = runPS $ makePutCat key value
     sent <- send sock msg
     sockSuccess sock
 
-sockSuccess :: Socket -> IO Bool
 sockSuccess sock = do
     rawRetCode <- recv sock 1
-    let retCode = BG.runGet getRetCode (toLazy rawRetCode)
-    return $ retCode == 0
+    let code = parseRetCode rawRetCode
+    return $ errorCode code
 
-out :: Socket -> LS.ByteString -> IO Bool
 out sock key = do
     let msg = runPS $ makeOut key
     sent <- send sock msg
     sockSuccess sock
 
-vsiz :: Socket -> LS.ByteString -> IO (Maybe Int)
 vsiz sock key = do
-    --let metaData = runPut $ makeVsiz key
-    --let msg = toStrict $ LS.concat [metaData, key]
     let msg = runPS $ makeVsiz key
     res <- send sock msg
-    fetch <- recv sock 5
-    let (code, valLen) = BG.runGet getGet $ toLazy fetch
+    rc <- recv sock 1
+    let code = parseRetCode rc
     case code of
-        0 -> return $ Just valLen
-        _ -> return Nothing
+        0 -> do
+            fetch <- recv sock 4
+            return $ Right $ parseLen fetch
+        x -> return $ Left $ errorCode x
 
 mget sock keys = do
     let msg = toStrict . runPut $ makeMGet keys
     res <- send sock msg
-    hdr <- recv sock 5
-    let (code, rnum) = BG.runGet getGet $ toLazy hdr
-    pairs <- getManyMGet sock rnum []
-    return pairs
+    rc <- recv sock 1
+    let code = parseRetCode rc
+    case code of
+        0 -> do
+            rnumRaw <- recv sock 4
+            let rnum = parseLen rnumRaw
+            pairs <- getManyMGet sock rnum []
+            return $ Right pairs
+        x -> return $ Left $ errorCode x
 
 makeMGet keys = do
-    put C.magic
-    put C.mget
-    let nkeys = len32 keys
+    put C.magic >> put C.mget
     put nkeys
     let z = [(length32 x, x) | x <- keys]
     mapM_ (\(x, y) -> put x >> putLazyByteString y) z
+    where nkeys = len32 keys
 
 getManyMGet _ 0 acc = return acc
 getManyMGet sock rnum acc = do
@@ -188,12 +192,18 @@ getGet = do
     return (code, len)
 
 vanish sock = do
-    let msg = toStrict . runPut $ (put C.magic >> put C.vanish)
+    let msg = runPS $ (put C.magic >> put C.vanish)
     sent <- send sock msg
     sockSuccess sock
 
-sync sock = do
-    let msg = toStrict . runPut $ (put C.magic >> put C.sync)
+sync sock = justCode sock C.sync
+    --let msg = toStrict . runPut $ (put C.magic >> put C.sync)
+    --let msg = runPS $ (put C.magic >>
+    --sent <- send sock msg
+    --sockSuccess sock
+
+justCode sock code = do
+    let msg = runPS $ (put C.magic >> put code)
     sent <- send sock msg
     sockSuccess sock
 
@@ -208,6 +218,8 @@ addInt sock key x = do
     let klen = length32 key
     let msg = toStrict . runPut $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
     sent <- send sock msg
+    rc <- recv sock 1
+    let code = parseRetCode rc
     fetch <- recv sock 5
     let (code, thesum) = BG.runGet getGet $ toLazy fetch
     case code of
@@ -331,7 +343,6 @@ parseLenGet = do
     return c
 parseLen s = BG.runGet parseLenGet $ toLazy s
 
-parseRetCode = BG.runGet getRetCode . toLazy
 iternext sock = do  
     let msg = runPS $ (put C.magic >> put C.iternext)
     sent <- send sock msg
@@ -437,13 +448,10 @@ main = do
     let v2 = LS.pack "gabi"
     pkd <- putKeep s k v2
     redid <- getValue s k
-    print redid
     --Now slap another "blab" on the end
     catd <- putCat s k v
-    print catd
     --show
     hey <- getValue s k
-    print hey
     --add another pair
     yodo <- putValue s k2 v2
     print yodo
@@ -455,6 +463,7 @@ main = do
     -- Try to fetch value which we've just killed, should be Nothing
     zoop2 <- getValue s k2
     print zoop2
+    print "HIHIHIHIHIHI"
     valSize <- vsiz s k
     print valSize
     let keys = [LS.pack "yex", LS.pack "one", k]
@@ -502,5 +511,8 @@ main = do
     fmks <- fwmkeys s (LS.pack "k") 10
     let fname = LS.pack "fibonacci"
     ext0 <- ext s fname k12 v12 []
+    misky <- misc s (LS.pack "getlist") [LS.pack "k12"] []
+    let keyList = map LS.pack ["k14", "v14", "k15", "v15"]
+    masky <- misc s (LS.pack "putlist") keyList []
     sClose s
-    return ext0
+    return masky
