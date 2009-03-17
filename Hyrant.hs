@@ -312,6 +312,38 @@ putnr sock key value = do
     sent <- send sock msg
     return ()
 
+successOrError sock = do
+    rawCode <- recv sock 1
+    let code = BG.runGet getRetCode $ toLazy rawCode
+    case code of
+        0 -> return $ Right True
+        x -> return $ Left $ errorCode x
+
+iterinit sock = do
+    let msg = runPS $ (put C.magic >> put C.iterinit)
+    sent <- send sock msg
+    successOrError sock
+
+parseLen = do
+    b <- get :: Get Int32
+    let c = (fromIntegral b)::Int
+    return c
+
+parseRetCode = BG.runGet getRetCode . toLazy
+iternext sock = do  
+    let msg = runPS $ (put C.magic >> put C.iternext)
+    sent <- send sock msg
+    rawCode <- recv sock 1
+    case (parseRetCode rawCode) of
+        0 -> do
+            ksizRaw <- recv sock 4
+            let ksiz = BG.runGet parseLen $ toLazy ksizRaw
+            kbuf <- recv sock ksiz 
+            let klen = (fromIntegral ksiz)::Int64
+            let key = BG.runGet (BG.getLazyByteString klen) $ toLazy kbuf
+            return $ Right key
+        x -> return $ Left $ errorCode x
+
 main = do
     let k = LS.pack "hab"
     let v = LS.pack "blab"
@@ -379,5 +411,8 @@ main = do
     let k11 = LS.pack "k11"
     let v11 = LS.pack "v11"
     pnrd <- putnr s k11 v11
+    gog <- iterinit s
+    ham <- iternext s
+    sam <- iternext s
     sClose s
-    return blub
+    return (ham, sam)
