@@ -1,5 +1,3 @@
-import Control.Monad
-import Control.Arrow ((&&&))
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
 import qualified Data.ByteString.Lazy.Char8 as LS
@@ -10,6 +8,16 @@ import Data.Int
 import Data.Binary.Put (runPut, putLazyByteString)
 import Data.Word (Word8, Word16, Word32)
 import qualified Constants as C
+
+errorCode 0 = "success"
+errorCode 1 = "invalid operation"
+errorCode 2 = "host not found"
+errorCode 3 = "connection refused"
+errorCode 4 = "send error"
+errorCode 5 = "recv error"
+errorCode 6 = "existing record"
+errorCode 7 = "no record found"
+errorCode 9999 = "miscellaneous error"
 
 toStrict = S.concat . LS.toChunks
 toLazy s = LS.fromChunks [s]
@@ -70,17 +78,15 @@ openConnect hostname port = do
     connect sock (addrAddress addr)
     return sock
 
-putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
+--putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO Bool
 putValue sock key value = do
     let msg = runPS $ makePut key value
     res <- send sock msg
-    sockSuccess sock
-
-putIntValue :: (Num a, Integral a) => Socket -> LS.ByteString -> a -> IO Bool
-putIntValue sock key value = do
-    let vi32 = (fromIntegral value)::Int32
-    let vbs = runPut $ put vi32
-    putValue sock key vbs
+    rawRetCode <- recv sock 1
+    let retCode = BG.runGet getRetCode $ toLazy rawRetCode
+    case retCode of
+        0 -> return $ Right True
+        x -> return $ Left $ errorCode x
 
 getValue :: Socket -> LS.ByteString -> IO (Maybe LS.ByteString)
 getValue sock key = do
@@ -244,11 +250,15 @@ restore sock path ts = do
     sent <- send sock $ runPS restorePut
     sockSuccess sock
 
+setmstPut host port = do
+    put C.magic >> put C.setmst 
+    put hl >> put port32
+    putLazyByteString host
+    where hl = length32 host
+          port32 = (fromIntegral port)::Int32
+
 setmst sock host port = do
-    let hl = length32 host
-    let port32 = (fromIntegral port)::Int32
-    let setmstPut = (put C.magic >> put C.setmst >> put hl >> put port32 >> putLazyByteString host)
-    sent <- send sock $ runPS setmstPut
+    sent <- send sock $ runPS $ setmstPut host port
     sockSuccess sock
 
 integFract :: (RealFrac b) => b -> (Int64, Int64)
@@ -278,6 +288,29 @@ adddouble sock key num = do
             fetch <- recv sock 16
             return $ Just $ BG.runGet parseAddDoubleReponse $ toLazy fetch
         _ -> return Nothing
+
+putshlPut key value width = do
+    put C.magic >> put C.putshl
+    put klen >> put vlen >> put w32
+    putLazyByteString key >> putLazyByteString value
+    where klen = length32 key
+          vlen = length32 value
+          w32 = (fromIntegral width)::Int32
+
+putshl sock key value width = do
+    let msg = runPS $ putshlPut key value width
+    sent <- send sock msg
+    rawCode <- recv sock 1
+    let code = BG.runGet getRetCode $ toLazy rawCode
+    case code of
+        0 -> return $ Right True
+        x -> return $ Left $ errorCode x
+
+putnrPut = makePuts C.putnr
+putnr sock key value = do
+    let msg = runPS $ putnrPut key value
+    sent <- send sock msg
+    return ()
 
 main = do
     let k = LS.pack "hab"
@@ -324,9 +357,6 @@ main = do
     sz <- size s
     numrecs <- rnum s
     stats <- stat s
-    let k4 = LS.pack "xxx"
-    let v4 = 9
-    pti <- putIntValue s k4 v4
     let k5 = LS.pack "dubval"
     let v5 = LS.pack "500"
     randy <- putValue s k5 v5
@@ -343,5 +373,11 @@ main = do
     let k9 = LS.pack "blogo"
     i0 <- getInt s k9
     inext <- addInt s k9 1
+    let k10 = LS.pack "sub"
+    let v10 = LS.pack "v10"
+    blub <- putshl s k10 v10 10
+    let k11 = LS.pack "k11"
+    let v11 = LS.pack "v11"
+    pnrd <- putnr s k11 v11
     sClose s
-    return inext
+    return blub
