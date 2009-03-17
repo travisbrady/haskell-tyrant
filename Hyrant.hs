@@ -290,8 +290,9 @@ adddouble sock key num = do
     let (integ, fract) = integFract num
     let msg = runPS $ doublePut key integ fract
     sent <- send sock msg
-    rawCode <- recv sock 1
-    let code = BG.runGet getRetCode $ toLazy rawCode
+    rc <- recv sock 1
+    let code = parseRetCode rc
+    --let code = BG.runGet getRetCode $ toLazy rawCode
     case code of
         0 -> do
             fetch <- recv sock 16
@@ -346,7 +347,6 @@ iternext sock = do
     case (parseRetCode rawCode) of
         0 -> do
             ksizRaw <- recv sock 4
-            --let ksiz = BG.runGet parseLen $ toLazy ksizRaw
             let ksiz = parseLen ksizRaw
             kbuf <- recv sock ksiz 
             let klen = (fromIntegral ksiz)::Int64
@@ -368,7 +368,6 @@ fwmkeys sock prefix maxKeys = do
     case (parseRetCode rawCode) of
         0 -> do
             knumRaw <- recv sock 4
-            --let knum = BG.runGet parseLen $ toLazy knumRaw
             let knum = parseLen knumRaw
             theKeys <- getManyElements sock knum []
             return $ Right theKeys
