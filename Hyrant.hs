@@ -31,8 +31,7 @@ len32 lst = fromIntegral $ length lst
 
 runPS = toStrict . runPut
 
-makeVsiz :: LS.ByteString -> Put
-makeVsiz key = do
+oneValPut key = do
     put C.magic >> put C.vsiz
     put klen >> putLazyByteString key
     where klen = length32 key
@@ -133,7 +132,7 @@ out sock key = do
     sockSuccess sock
 
 vsiz sock key = do
-    let msg = runPS $ makeVsiz key
+    let msg = runPS $ oneValPut key
     res <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
@@ -191,16 +190,8 @@ getGet = do
     let len = (fromEnum ln)::Int
     return (code, len)
 
-vanish sock = do
-    let msg = runPS $ (put C.magic >> put C.vanish)
-    sent <- send sock msg
-    sockSuccess sock
-
+vanish sock  = justCode sock C.vanish
 sync sock = justCode sock C.sync
-    --let msg = toStrict . runPut $ (put C.magic >> put C.sync)
-    --let msg = runPS $ (put C.magic >>
-    --sent <- send sock msg
-    --sockSuccess sock
 
 justCode sock code = do
     let msg = runPS $ (put C.magic >> put code)
@@ -208,8 +199,9 @@ justCode sock code = do
     sockSuccess sock
 
 copy sock path = do
-    let pathLen = length32 path
-    let msg = toStrict . runPut $ (put C.magic >> put C.copy >> put pathLen >> putLazyByteString path)
+    let msg = runPS $ oneValPut path
+    --let pathLen = length32 path
+    --let msg = toStrict . runPut $ (put C.magic >> put C.copy >> put pathLen >> putLazyByteString path)
     sent <- send sock msg
     sockSuccess sock
 
