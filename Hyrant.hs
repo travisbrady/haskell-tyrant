@@ -241,14 +241,16 @@ rnum sock = sizeOrRNum sock C.rnum
 
 stat sock = do
     sent <- send sock $ toStrict . runPut $ (put C.magic >> put C.stat)
-    resHeader <- recv sock 5
-    let (code, ssiz) = BG.runGet getGet $ toLazy resHeader
+    rc <- recv sock 1
+    let code = parseRetCode rc
     case code of
         0 -> do
-            rawStat <- recv sock ssiz
-            let statPairs = map (S.split '\t') $ S.lines rawStat
-            return $ Just statPairs
-        _ -> return Nothing
+            ssizRaw <- recv sock 4
+            let ssiz = parseLen ssizRaw
+            statRaw <- recv sock ssiz
+            let statPairs = map (S.split '\t') $ S.lines statRaw
+            return $ Right statPairs
+        x -> return $ Left $ errorCode x
 
 restore sock path ts = do
     let pl = length32 path
