@@ -8,6 +8,7 @@ import Data.Int
 import Data.Binary.Put (runPut, putLazyByteString)
 import Data.Word (Word8, Word16, Word32)
 import qualified Constants as C
+import Data.Bits ((.|.))
 
 errorCode 0 = "success"
 errorCode 1 = "invalid operation"
@@ -324,10 +325,11 @@ iterinit sock = do
     sent <- send sock msg
     successOrError sock
 
-parseLen = do
+parseLenGet = do
     b <- get :: Get Int32
     let c = (fromIntegral b)::Int
     return c
+parseLen s = BG.runGet parseLenGet $ toLazy s
 
 parseRetCode = BG.runGet getRetCode . toLazy
 iternext sock = do  
@@ -337,7 +339,8 @@ iternext sock = do
     case (parseRetCode rawCode) of
         0 -> do
             ksizRaw <- recv sock 4
-            let ksiz = BG.runGet parseLen $ toLazy ksizRaw
+            --let ksiz = BG.runGet parseLen $ toLazy ksizRaw
+            let ksiz = parseLen ksizRaw
             kbuf <- recv sock ksiz 
             let klen = (fromIntegral ksiz)::Int64
             let key = BG.runGet (BG.getLazyByteString klen) $ toLazy kbuf
@@ -358,7 +361,8 @@ fwmkeys sock prefix maxKeys = do
     case (parseRetCode rawCode) of
         0 -> do
             knumRaw <- recv sock 4
-            let knum = BG.runGet parseLen $ toLazy knumRaw
+            --let knum = BG.runGet parseLen $ toLazy knumRaw
+            let knum = parseLen knumRaw
             theKeys <- getManyfwmkeys sock knum []
             return $ Right theKeys
         x -> return $ Left $ errorCode x
@@ -366,12 +370,41 @@ fwmkeys sock prefix maxKeys = do
 getManyfwmkeys _ 0 acc = return acc
 getManyfwmkeys sock knum acc = do
     klenRaw <- recv sock 4
-    let klen = BG.runGet parseLen $ toLazy klenRaw
+    --let klen = BG.runGet parseLen $ toLazy klenRaw
+    let klen = parseLen klenRaw
     keyRaw <- recv sock klen
     let key = BG.runGet (BG.getLazyByteString $ toEnum klen) $ toLazy keyRaw
     getManyfwmkeys sock (knum-1) (key:acc)
     
-            
+extPut funcname key value opts = do
+    put C.magic >> put C.ext
+    put nlen >> put opts >> put klen >> put vlen
+    putLazyByteString funcname
+    putLazyByteString key
+    putLazyByteString value
+    where nlen = length32 funcname
+          klen = length32 key
+          vlen = length32 value
+
+optOr :: [Int32] -> Int32
+optOr [] = 0
+optOr opts = foldl1 (.|.) opts
+
+readLazy nb s = BG.runGet (BG.getLazyByteString $ toEnum nb) $ toLazy s
+parseCode s = BG.runGet getRetCode $ toLazy s
+ext sock funcname key value opts = do
+    let msg = runPS $ extPut funcname key value $ optOr opts
+    sent <- send sock msg
+    rc <- recv sock 1
+    let rcp = parseCode rc
+    case rcp of
+        0 -> do
+            rsizRaw <- recv sock 4
+            let rsiz = parseLen rsizRaw
+            rbuf <- recv sock rsiz
+            let result = readLazy rsiz rbuf
+            return $ Right result
+        x -> return $ Left $ errorCode x
 
 main = do
     let k = LS.pack "hab"
@@ -447,5 +480,7 @@ main = do
     let v12 = LS.pack "v11"
     blump <- putValue s k12 v12
     fmks <- fwmkeys s (LS.pack "k") 10
+    let fname = LS.pack "fibonacci"
+    ext0 <- ext s fname k12 v12 []
     sClose s
-    return fmks
+    return ext0

@@ -1,6 +1,8 @@
 module Constants where
 
 import Data.Word (Word8)
+import Data.Bits (shiftL)
+import Data.Int
 
 magic :: Word8
 magic = 0xc8
@@ -52,3 +54,10 @@ stat :: Word8
 stat = 0x88
 misc :: Word8
 misc = 0x90
+
+rDBMONOULOG :: Int32
+rDBMONOULOG = 1 `shiftL` 0
+rDBXOLCKREC  :: Int32
+rDBXOLCKREC = 1 `shiftL` 0
+rDBXOLCKGLB :: Int32
+rDBXOLCKGLB = 1 `shiftL` 1
