@@ -344,6 +344,35 @@ iternext sock = do
             return $ Right key
         x -> return $ Left $ errorCode x
 
+fwmkeysPut prefix maxKeys = do
+    put C.magic >> put C.fwmkeys
+    put preflen >> put mx32
+    putLazyByteString prefix
+    where preflen = length32 prefix
+          mx32 = (fromIntegral maxKeys)::Int32
+
+fwmkeys sock prefix maxKeys = do
+    let msg = runPS $ fwmkeysPut prefix maxKeys
+    sent <- send sock msg
+    rawCode <- recv sock 1
+    case (parseRetCode rawCode) of
+        0 -> do
+            knumRaw <- recv sock 4
+            let knum = BG.runGet parseLen $ toLazy knumRaw
+            theKeys <- getManyfwmkeys sock knum []
+            return $ Right theKeys
+        x -> return $ Left $ errorCode x
+
+getManyfwmkeys _ 0 acc = return acc
+getManyfwmkeys sock knum acc = do
+    klenRaw <- recv sock 4
+    let klen = BG.runGet parseLen $ toLazy klenRaw
+    keyRaw <- recv sock klen
+    let key = BG.runGet (BG.getLazyByteString $ toEnum klen) $ toLazy keyRaw
+    getManyfwmkeys sock (knum-1) (key:acc)
+    
+            
+
 main = do
     let k = LS.pack "hab"
     let v = LS.pack "blab"
@@ -414,5 +443,9 @@ main = do
     gog <- iterinit s
     ham <- iternext s
     sam <- iternext s
+    let k12 = LS.pack "k12"
+    let v12 = LS.pack "v11"
+    blump <- putValue s k12 v12
+    fmks <- fwmkeys s (LS.pack "k") 10
     sClose s
-    return (ham, sam)
+    return fmks
