@@ -1,0 +1,20 @@
+Name:           haskell-tyrant
+Version:        0.1
+Cabal-Version:  >= 1.2
+Build-Type:     Simple
+License:        BSD3
+License-File:   LICENSE
+Author:         Travis Brady
+Maintainer:     Travis Brady
+Homepage:       http://github.com/travisbrady
+Category:       Database
+Synopsis:       Haskell implementation of the Tokyo Tyrant binary protocol.
+Description:    A pure Haskell implementation of the Tokyo Tyrant binary protocol.
+                Tokyo Tyrant is a database server for the Tokyo Cabinet
+                database library.  http://tokyocabinet.sourceforge.net/tyrantdoc/
+
+Library
+    Exposed-Modules:
+        Database.TokyoTyrant
+    Build-Depends: 
+        base,network,binary,bytestring,network-bytestring
