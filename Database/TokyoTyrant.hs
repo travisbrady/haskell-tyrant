@@ -5,7 +5,9 @@ module Database.TokyoTyrant
     ,putValue
     ,getValue
     ,getDouble
+    ,putDouble
     ,getInt
+    ,putInt
     ,putKeep
     ,putCat
     ,out
@@ -20,7 +22,7 @@ module Database.TokyoTyrant
     ,stat
     ,restore
     ,setmst
-    ,adddouble
+    ,addDouble
     ,putshl
     ,putnr
     ,iterinit
@@ -160,9 +162,19 @@ getValue sock key = do
             return $ Right $ toLazy rawValue
         x -> return $ Left $ errorCode x
 
+putDouble :: Socket -> LS.ByteString -> Double -> IO (Either [Char] Double)
+putDouble sock key value = do
+    out sock key
+    addDouble sock key value
+
 getDouble :: Socket -> LS.ByteString -> IO (Either [Char] Double)
 getDouble sock key = do 
-    adddouble sock key 0.0
+    addDouble sock key 0.0
+
+putInt :: Socket -> LS.ByteString -> Int -> IO (Either [Char] Int)
+putInt sock key value = do
+    out sock key
+    addInt sock key value
 
 getInt :: Socket -> LS.ByteString -> IO (Either [Char] Int)
 getInt sock key = do
@@ -383,7 +395,7 @@ doublePut key integ fract = do
     putLazyByteString key
     where klen = length32 key
 
-adddouble sock key num = do
+addDouble sock key num = do
     let (integ, fract) = integFract num
     let msg = runPS $ doublePut key integ fract
     sent <- send sock msg

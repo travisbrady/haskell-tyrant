@@ -45,6 +45,10 @@ testBasic conn = do
     killed <- out conn k
     print killed
 
+testputDouble conn = do
+    pd <- putDouble conn (LS.pack "k1") 999.9
+    print pd
+
 main = do
     s <- openConnect "localhost" "1978"
     let outPath = LS.pack "/home/travis/hogo.tch"
@@ -59,9 +63,9 @@ main = do
     print numrecs
     stats <- stat s
     print stats
-    dubx <- adddouble s (LS.pack "k5") 5.5
+    dubx <- addDouble s (LS.pack "k5") 5.5
     let k6 = LS.pack "blah"
-    dud <- adddouble s k6 10.005
+    dud <- addDouble s k6 10.005
     theDub <- getDouble s k6
     print theDub
     let k7 = LS.pack "k7"
@@ -91,4 +95,5 @@ main = do
     testMget s
     areTheyGone <- vanish s
     print areTheyGone
+    testputDouble s
     close s
