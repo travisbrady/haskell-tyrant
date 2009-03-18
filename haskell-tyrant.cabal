@@ -8,13 +8,19 @@ Author:         Travis Brady
 Maintainer:     Travis Brady
 Homepage:       http://github.com/travisbrady
 Category:       Database
-Synopsis:       Haskell implementation of the Tokyo Tyrant binary protocol.
-Description:    A pure Haskell implementation of the Tokyo Tyrant binary protocol.
-                Tokyo Tyrant is a database server for the Tokyo Cabinet
-                database library.  http://tokyocabinet.sourceforge.net/tyrantdoc/
+Synopsis:       Haskell implementation of the Tokyo Tyrant binary protocol
+Description:    
+    A pure Haskell implementation of the Tokyo Tyrant binary protocol.
+    Tokyo Tyrant is a database server for the Tokyo Cabinet
+    database library.  http://tokyocabinet.sourceforge.net/tyrantdoc/
 
 Library
     Exposed-Modules:
         Database.TokyoTyrant
+        Database.TokyoTyrant.Constants
     Build-Depends: 
-        base,network,binary,bytestring,network-bytestring
+        base,
+        network,
+        binary, 
+        bytestring, 
+        network-bytestring
