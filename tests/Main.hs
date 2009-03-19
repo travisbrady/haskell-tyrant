@@ -1,14 +1,18 @@
+-- A few basic tests
 module Main where
 
 import qualified Data.ByteString.Lazy.Char8 as LS
 import Database.TokyoTyrant
 
+-- Call the fibonacci function used in the Tokyo Tyrant tutorial at:
+-- http://tokyocabinet.sourceforge.net/tyrantdoc/#tutorial_luaext
 testExt conn = do
     let v = LS.pack "9"
     let fname = LS.pack "fibonacci"
     ret <- ext conn fname v LS.empty []
     return ret
 
+-- fetch a few values at once
 testMget conn = do
     let k1 = LS.pack "CA"
     let v1 = LS.pack "California"
