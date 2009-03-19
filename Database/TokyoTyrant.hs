@@ -1,3 +1,13 @@
+-- |
+-- Module       : Database.TokyoTyrant
+-- Copyright    : (c) Travis Brady 2009
+--
+-- License      : BSD-style
+-- Maintainer   : travis.brady@gmail.com
+-- Stability    : Experimental
+--  
+-- A pure Haskell interface to the Tokyo Tyrant database server
+--
 module Database.TokyoTyrant 
     (TyrantOption(RecordLocking, GlobalLocking, NoUpdateLog)
     ,openConnect
@@ -29,8 +39,7 @@ module Database.TokyoTyrant
     ,iternext
     ,fwmkeys
     ,ext
-    ,misc)
-    where
+    ,misc) where
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString
@@ -50,11 +59,13 @@ data TyrantOption = RecordLocking   -- `RDBXOLCKREC' for record locking
                     | NoUpdateLog   -- `RDBMONOULOG' for omission of the update log
     deriving (Eq, Show)
 
+-- | Convert TyrantOption type to Int32
 optToInt32 :: TyrantOption -> Int32
 optToInt32 RecordLocking = C.rDBXOLCKREC
 optToInt32 GlobalLocking = C.rDBXOLCKGLB 
 optToInt32 NoUpdateLog   = C.rDBMONOULOG 
 
+-- | Convert Tokyo Tyrant error codes to string representation
 errorCode :: Int -> String
 errorCode 0 = "success"
 errorCode 1 = "invalid operation"
@@ -81,15 +92,10 @@ length32 s = fromIntegral $ LS.length s
 len32 :: [a] -> Int32
 len32 lst = fromIntegral $ length lst
 
+-- | Create a Put with two params
 oneValPut :: (Binary t) => t -> LS.ByteString -> PutM ()
 oneValPut code key = do
     put C.magic >> put code
-    put klen >> putLazyByteString key
-    where klen = length32 key
-
-makeOut :: LS.ByteString -> Put
-makeOut key = do
-    put C.magic >> put C.out
     put klen >> putLazyByteString key
     where klen = length32 key
 
@@ -121,6 +127,7 @@ getRetCode = do
     let ret = (fromEnum rawCode)::Int
     return ret
 
+-- | Connect to Tokyo Tyrant
 openConnect :: HostName -> ServiceName -> IO Socket
 openConnect hostname port = do
     addrinfos <- getAddrInfo Nothing (Just hostname) (Just port)
@@ -130,6 +137,7 @@ openConnect hostname port = do
     connect sock (addrAddress addr)
     return sock
 
+-- | Close connection to ttserver
 close :: Socket -> IO ()
 close sock = sClose sock
 
@@ -142,11 +150,14 @@ simpleSuccess sock = do
         0 -> return . Right $ errorCode 0
         x -> return . Left $ errorCode x
 
+-- | Store a record
+putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO (Either String String)
 putValue sock key value = do
     let msg = runPS $ makePut key value
     res <- send sock msg
     simpleSuccess sock
 
+-- | Retrieve a record
 getValue :: Socket -> LS.ByteString -> IO (Either String LS.ByteString)
 getValue sock key = do
     let msg = runPS $ makeGet key
@@ -161,6 +172,7 @@ getValue sock key = do
             return $ Right $ toLazy rawValue
         x -> return $ Left $ errorCode x
 
+-- | Store a record where the value is a double
 putDouble :: Socket -> LS.ByteString -> Double -> IO (Either [Char] Double)
 putDouble sock key value = do
     out sock key
@@ -170,39 +182,46 @@ getDouble :: Socket -> LS.ByteString -> IO (Either [Char] Double)
 getDouble sock key = do 
     addDouble sock key 0.0
 
+-- | Store a record with an Int value
 putInt :: Socket -> LS.ByteString -> Int -> IO (Either [Char] Int)
 putInt sock key value = do
     out sock key
     addInt sock key value
 
+-- | Retrieve a record with an Int value
 getInt :: Socket -> LS.ByteString -> IO (Either [Char] Int)
 getInt sock key = do
     addInt sock key 0
 
-putKeep :: Socket -> LS.ByteString -> LS.ByteString -> IO [Char]
+-- | Store a new record
+--   If key already exists nothing is done
+putKeep :: Socket
+           -> LS.ByteString
+           -> LS.ByteString
+           -> IO (Either String String)
 putKeep sock key value = do
     let msg = runPS $ makePutKeep key value
     res <- send sock msg
-    sockSuccess sock
+    simpleSuccess sock
 
-putCat :: Socket -> LS.ByteString -> LS.ByteString -> IO [Char]
+-- | Concatenate a value at the end of the existing record
+putCat :: Socket
+          -> LS.ByteString
+          -> LS.ByteString
+          -> IO (Either String String)
 putCat sock key value = do
     let msg = runPS $ makePutCat key value
     sent <- send sock msg
-    sockSuccess sock
+    simpleSuccess sock
 
-sockSuccess :: Socket -> IO [Char]
-sockSuccess sock = do
-    rawRetCode <- recv sock 1
-    let code = parseRetCode rawRetCode
-    return $ errorCode code
-
-out :: Socket -> LS.ByteString -> IO [Char]
+-- | Remove a record
+out :: Socket -> LS.ByteString -> IO (Either String String)
 out sock key = do
-    let msg = runPS $ makeOut key
+    let msg = runPS $ oneValPut C.out key
     sent <- send sock msg
-    sockSuccess sock
+    simpleSuccess sock
 
+-- | Get the size of the value of a record
 vsiz :: Socket -> LS.ByteString -> IO (Either [Char] Int)
 vsiz sock key = do
     let msg = runPS $ oneValPut C.vsiz key
@@ -215,6 +234,7 @@ vsiz sock key = do
             return $ Right $ parseLen fetch
         x -> return $ Left $ errorCode x
 
+-- | Fetch keys and values for multiple records
 mget :: Socket
         -> [LS.ByteString]
         -> IO (Either [Char] [(LS.ByteString, LS.ByteString)])
@@ -266,33 +286,28 @@ getOneMGet ksize vsize = do
     v <- BG.getLazyByteString $ toEnum vsize
     return (k, v)
 
-getGet :: Get (Int, Int)
-getGet = do
-    rawcode <- BG.getWord8
-    let code = (fromEnum rawcode)::Int
-    --ln is "on success: A 32-bit integer standing for the length of the value"
-    ln <- BG.getWord32be
-    let len = (fromEnum ln)::Int
-    return (code, len)
-
-vanish :: Socket -> IO [Char]
+-- | Remove all records
+vanish :: Socket -> IO (Either String String)
 vanish sock  = justCode sock C.vanish
 
-sync :: Socket -> IO [Char]
+-- | Synchronize updated contents with the database file
+sync :: Socket -> IO (Either String String)
 sync sock = justCode sock C.sync
 
-justCode :: (Binary t) => Socket -> t -> IO [Char]
+justCode :: (Binary t) => Socket -> t -> IO (Either String String)
 justCode sock code = do
     let msg = runPS $ (put C.magic >> put code)
     sent <- send sock msg
-    sockSuccess sock
+    simpleSuccess sock
 
-copy :: Socket -> LS.ByteString -> IO [Char]
+-- | Copy the database file to the specified path
+copy :: Socket -> LS.ByteString -> IO (Either String String)
 copy sock path = do
     let msg = runPS $ oneValPut C.copy path
     sent <- send sock msg
-    sockSuccess sock
+    simpleSuccess sock
 
+-- | Add an integer to a record
 addInt :: (Integral a) =>
           Socket -> LS.ByteString -> a -> IO (Either [Char] Int)
 addInt sock key x = do
@@ -328,12 +343,15 @@ sizeOrRNum sock cmdId = do
             return $ Right size
         x -> return $ Left $ errorCode x
 
+-- | Get the size of the database
 size :: Socket -> IO (Either [Char] Int)
 size sock = sizeOrRNum sock C.size
 
+-- | Get the number of records
 rnum :: Socket -> IO (Either [Char] Int)
 rnum sock = sizeOrRNum sock C.rnum
 
+-- | Get the stats string
 stat :: Socket -> IO (Either [Char] [[S.ByteString]])
 stat sock = do
     sent <- send sock $ toStrict . runPut $ (put C.magic >> put C.stat)
@@ -348,14 +366,15 @@ stat sock = do
             return $ Right statPairs
         x -> return $ Left $ errorCode x
 
+-- | Restore the database with update log
 restore :: (Integral a) =>
-           Socket -> LS.ByteString -> a -> IO [Char]
+           Socket -> LS.ByteString -> a -> IO (Either String String)
 restore sock path ts = do
     let pl = length32 path
     let ts64 = (fromIntegral ts)::Int64
     let restorePut = (put C.magic >> put C.restore >> put pl >> put ts64 >> putLazyByteString path)
     sent <- send sock $ runPS restorePut
-    sockSuccess sock
+    simpleSuccess sock
 
 setmstPut :: (Integral a) => LS.ByteString -> a -> PutM ()
 setmstPut host port = do
@@ -365,10 +384,10 @@ setmstPut host port = do
     where hl = length32 host
           port32 = (fromIntegral port)::Int32
 
-setmst :: (Integral a) => Socket -> LS.ByteString -> a -> IO [Char]
+-- | Set the replication master
 setmst sock host port = do
     sent <- send sock $ runPS $ setmstPut host port
-    sockSuccess sock
+    simpleSuccess sock
 
 integFract :: (RealFrac b) => b -> (Int64, Int64)
 integFract num = (integ, fract)
@@ -386,14 +405,14 @@ parseAddDoubleReponse = do
     fract <- get :: Get Int64
     return (integ, fract)
 
-doublePut :: (Binary t, Binary t1) =>
-             LS.ByteString -> t -> t1 -> PutM ()
+doublePut :: (Binary t, Binary t1) => LS.ByteString -> t -> t1 -> PutM ()
 doublePut key integ fract = do
     put C.magic >> put C.adddouble
     put klen >> put integ >> put fract
     putLazyByteString key
     where klen = length32 key
 
+-- | Add a real number to a record
 addDouble sock key num = do
     let (integ, fract) = integFract num
     let msg = runPS $ doublePut key integ fract
@@ -417,6 +436,13 @@ putshlPut key value width = do
           vlen = length32 value
           w32 = (fromIntegral width)::Int32
 
+-- | concatenate a value at the end of the existing record and shift it to the lef
+putshl :: (Integral a) =>
+          Socket            -- ^ Connection
+          -> LS.ByteString  -- ^ key
+          -> LS.ByteString  -- ^ value
+          -> a              -- ^ width
+          -> IO (Either String String)
 putshl sock key value width = do
     let msg = runPS $ putshlPut key value width
     sent <- send sock msg
@@ -425,17 +451,19 @@ putshl sock key value width = do
 putnrPut :: LS.ByteString -> LS.ByteString -> Put
 putnrPut = makePuts C.putnr
 
+-- | store a record into a remote database object without response from the server
 putnr :: Socket -> LS.ByteString -> LS.ByteString -> IO ()
 putnr sock key value = do
     let msg = runPS $ putnrPut key value
     sent <- send sock msg
     return ()
 
-iterinit :: Socket -> IO [Char]
+-- | initialize the iterator of a remote database object
+iterinit :: Socket -> IO (Either String String)
 iterinit sock = do
     let msg = runPS $ (put C.magic >> put C.iterinit)
     sent <- send sock msg
-    sockSuccess sock
+    simpleSuccess sock
 
 parseLenGet :: Get Int
 parseLenGet = do
@@ -446,6 +474,7 @@ parseLenGet = do
 parseLen :: S.ByteString -> Int
 parseLen s = BG.runGet parseLenGet $ toLazy s
 
+-- | get the next key of the iterator of a remote database object
 iternext :: Socket -> IO (Either [Char] LS.ByteString)
 iternext sock = do  
     let msg = runPS $ (put C.magic >> put C.iternext)
@@ -469,6 +498,7 @@ fwmkeysPut prefix maxKeys = do
     where preflen = length32 prefix
           mx32 = (fromIntegral maxKeys)::Int32
 
+-- | get forward matching keys in a remote database object
 fwmkeys :: (Integral a) =>
            Socket -> LS.ByteString -> a -> IO (Either [Char] [LS.ByteString])
 fwmkeys sock prefix maxKeys = do
@@ -517,11 +547,12 @@ readLazy nb s = BG.runGet (BG.getLazyByteString $ toEnum nb) $ toLazy s
 parseCode :: S.ByteString -> Int
 parseCode s = BG.runGet getRetCode $ toLazy s
 
-ext :: Socket
-       -> LS.ByteString
-       -> LS.ByteString
-       -> LS.ByteString
-       -> [TyrantOption]
+-- | Call a function of the script language extension
+ext :: Socket               -- ^ Connection to Tokyo Tyrant
+       -> LS.ByteString     -- ^ the lua function to be called
+       -> LS.ByteString     -- ^ specifies the key
+       -> LS.ByteString     -- ^ specified the value
+       -> [TyrantOption]    -- ^ locking and update log options
        -> IO (Either [Char] LS.ByteString)
 ext sock funcname key value opts = do
     let msg = runPS $ extPut funcname key value $ optOr opts
@@ -544,10 +575,15 @@ miscPut funcname args opts = do
     where nlen = length32 funcname
           rnum = len32 args
 
-misc :: Socket
-        -> LS.ByteString
-        -> [LS.ByteString]
-        -> [TyrantOption]
+-- | Call a versatile function for miscellaneous operations
+-- funcname can be "getlist", "putlist" and "outlist"
+-- getlist takes a list of keys and returns a list of values
+-- putlist takes a list of keys and values one after the other and returns []
+-- outlist takes a list of keys and removes those records
+misc :: Socket              -- ^ Connection to Tokyo Tyrant
+        -> LS.ByteString    -- ^ funcname
+        -> [LS.ByteString]  -- ^ args
+        -> [TyrantOption]   -- ^ options
         -> IO (Either [Char] [LS.ByteString])
 misc sock funcname args opts = do
     let msg = runPS $ miscPut funcname args $ optOr opts
