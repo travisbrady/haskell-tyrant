@@ -55,7 +55,7 @@ testputDouble conn = do
 
 main = do
     s <- openConnection "localhost" "1978"
-    let outPath = LS.pack "/home/travis/hogo.tch"
+    let outPath = LS.pack "hogo.tch"
     copyConfirm <- copy s outPath
     print copyConfirm
     let k3 = LS.pack "dude"
