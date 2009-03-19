@@ -17,6 +17,7 @@ Description:
 Library
     Exposed-Modules:
         Database.TokyoTyrant
+    Other-Modules:
         Database.TokyoTyrant.Constants
     Build-Depends: 
         base,
