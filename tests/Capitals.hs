@@ -3,7 +3,9 @@ module Main where
 import qualified Data.ByteString.Lazy.Char8 as LS
 import Database.TokyoTyrant
 
-main = do
+main = test
+
+test = do
     conn <- openConnect "localhost" "1978"
     let lst = concatMap (\(x, y) -> [x, y]) testData
     rc <- misc conn (LS.pack "putlist") lst []
