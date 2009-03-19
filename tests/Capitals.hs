@@ -16,6 +16,7 @@ test = do
     print someCaps
     --Now remove some records
     outcode <- misc conn (LS.pack "outlist") aFew []
+    -- should be an empty list
     print outcode
     closeConnection conn
 
