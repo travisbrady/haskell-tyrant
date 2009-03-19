@@ -41,8 +41,9 @@ import qualified Data.Binary.Get as BG
 import Data.Binary.Put (runPut, putLazyByteString, PutM)
 import Data.Int
 import Data.Word (Word8, Word16, Word32)
-import qualified Database.TokyoTyrant.Constants as C
 import Data.Bits ((.|.))
+
+import qualified Database.TokyoTyrant.Constants as C
 
 data TyrantOption = RecordLocking   -- `RDBXOLCKREC' for record locking
                     | GlobalLocking -- `RDBXOLCKGLB' for global locking
@@ -135,18 +136,16 @@ close sock = sClose sock
 parseRetCode :: S.ByteString -> Int
 parseRetCode = BG.runGet getRetCode . toLazy
 
-putValue :: Socket
-            -> LS.ByteString
-            -> LS.ByteString
-            -> IO (Either [Char] Bool)
+simpleSuccess sock = do
+    rc <- recv sock 1
+    case (parseRetCode rc) of
+        0 -> return . Right $ errorCode 0
+        x -> return . Left $ errorCode x
+
 putValue sock key value = do
     let msg = runPS $ makePut key value
     res <- send sock msg
-    rc <- recv sock 1
-    let retCode = parseRetCode rc
-    case retCode of
-        0 -> return $ Right True
-        x -> return $ Left $ errorCode x
+    simpleSuccess sock
 
 getValue :: Socket -> LS.ByteString -> IO (Either String LS.ByteString)
 getValue sock key = do
@@ -418,20 +417,10 @@ putshlPut key value width = do
           vlen = length32 value
           w32 = (fromIntegral width)::Int32
 
-putshl :: (Integral a) =>
-          Socket
-          -> LS.ByteString
-          -> LS.ByteString
-          -> a
-          -> IO (Either [Char] Bool)
 putshl sock key value width = do
     let msg = runPS $ putshlPut key value width
     sent <- send sock msg
-    rawCode <- recv sock 1
-    let code = BG.runGet getRetCode $ toLazy rawCode
-    case code of
-        0 -> return $ Right True
-        x -> return $ Left $ errorCode x
+    simpleSuccess sock
 
 putnrPut :: LS.ByteString -> LS.ByteString -> Put
 putnrPut = makePuts C.putnr

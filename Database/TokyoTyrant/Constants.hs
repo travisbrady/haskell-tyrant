@@ -56,8 +56,8 @@ misc :: Word8
 misc = 0x90
 
 rDBMONOULOG :: Int32
-rDBMONOULOG = 1 `shiftL` 0
+rDBMONOULOG = 1 `shiftL` 0  -- No update log
 rDBXOLCKREC  :: Int32
-rDBXOLCKREC = 1 `shiftL` 0
+rDBXOLCKREC = 1 `shiftL` 0  -- Record locking
 rDBXOLCKGLB :: Int32
-rDBXOLCKGLB = 1 `shiftL` 1
+rDBXOLCKGLB = 1 `shiftL` 1  -- Global locking
