@@ -6,7 +6,7 @@ License:        BSD3
 License-File:   LICENSE
 Author:         Travis Brady <travis.brady@gmail.com>
 Maintainer:     Travis Brady <travis.brady@gmail.com>
-Homepage:       http://github.com/travisbrady
+Homepage:       http://github.com/travisbrady/haskell-tyrant/tree/master
 Category:       Database
 Synopsis:       Haskell implementation of the Tokyo Tyrant binary protocol
 Description:    
