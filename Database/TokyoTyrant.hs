@@ -10,8 +10,8 @@
 --
 module Database.TokyoTyrant 
     (TyrantOption(RecordLocking, GlobalLocking, NoUpdateLog)
-    ,openConnect
-    ,close
+    ,openConnection
+    ,closeConnection
     ,putValue
     ,getValue
     ,getDouble
@@ -128,8 +128,8 @@ getRetCode = do
     return ret
 
 -- | Connect to Tokyo Tyrant
-openConnect :: HostName -> ServiceName -> IO Socket
-openConnect hostname port = do
+openConnection :: HostName -> ServiceName -> IO Socket
+openConnection hostname port = do
     addrinfos <- getAddrInfo Nothing (Just hostname) (Just port)
     let addr = head addrinfos
     sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
@@ -138,8 +138,8 @@ openConnect hostname port = do
     return sock
 
 -- | Close connection to ttserver
-close :: Socket -> IO ()
-close sock = sClose sock
+closeConnection :: Socket -> IO ()
+closeConnection sock = sClose sock
 
 parseRetCode :: S.ByteString -> Int
 parseRetCode = BG.runGet getRetCode . toLazy

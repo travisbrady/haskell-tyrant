@@ -50,7 +50,7 @@ testputDouble conn = do
     print pd
 
 main = do
-    s <- openConnect "localhost" "1978"
+    s <- openConnection "localhost" "1978"
     let outPath = LS.pack "/home/travis/hogo.tch"
     copyConfirm <- copy s outPath
     print copyConfirm
@@ -96,4 +96,4 @@ main = do
     areTheyGone <- vanish s
     print areTheyGone
     testputDouble s
-    close s
+    closeConnection s

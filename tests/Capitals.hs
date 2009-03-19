@@ -6,7 +6,7 @@ import Database.TokyoTyrant
 main = test
 
 test = do
-    conn <- openConnect "localhost" "1978"
+    conn <- openConnection "localhost" "1978"
     let lst = concatMap (\(x, y) -> [x, y]) testData
     rc <- misc conn (LS.pack "putlist") lst []
     print rc
@@ -17,7 +17,7 @@ test = do
     --Now remove some records
     outcode <- misc conn (LS.pack "outlist") aFew []
     print outcode
-    close conn
+    closeConnection conn
 
 testData = map (\(x, y) -> (LS.pack x, LS.pack y)) [
     ("Afghanistan", "Kabul"),

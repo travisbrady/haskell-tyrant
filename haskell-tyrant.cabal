@@ -4,8 +4,8 @@ Cabal-Version:  >= 1.2
 Build-Type:     Simple
 License:        BSD3
 License-File:   LICENSE
-Author:         Travis Brady
-Maintainer:     Travis Brady
+Author:         Travis Brady <travis.brady@gmail.com>
+Maintainer:     Travis Brady <travis.brady@gmail.com>
 Homepage:       http://github.com/travisbrady
 Category:       Database
 Synopsis:       Haskell implementation of the Tokyo Tyrant binary protocol
@@ -13,6 +13,7 @@ Description:
     A pure Haskell implementation of the Tokyo Tyrant binary protocol.
     Tokyo Tyrant is a database server for the Tokyo Cabinet
     database library.  http://tokyocabinet.sourceforge.net/tyrantdoc/
+Extra-Source-Files: README.md
 
 Library
     Exposed-Modules:
