@@ -11,7 +11,7 @@ A simple example assuming you've got ttserver running at the default location
     module Main where
 
     import Database.TokyoTyrant
-    import Data.ByteString.Lazy.Char8 (pack_
+    import Data.ByteString.Lazy.Char8 (pack)
 
     defaultHost = "localhost"
     defaultPort = "1978"
