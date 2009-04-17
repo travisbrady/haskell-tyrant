@@ -25,4 +25,4 @@ Library
         network,
         binary, 
         bytestring, 
-        network-bytestring
+        network-bytestring >= 0.1.2

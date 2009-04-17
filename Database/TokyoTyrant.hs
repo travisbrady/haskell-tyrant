@@ -42,9 +42,8 @@ module Database.TokyoTyrant
     ,misc) where
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
-import Network.Socket.ByteString
+import Network.Socket.ByteString.Lazy
 import qualified Data.ByteString.Lazy.Char8 as LS
-import qualified Data.ByteString.Char8 as S
 import Data.Binary
 import qualified Data.Binary.Get as BG
 import Data.Binary.Put (runPut, putLazyByteString, PutM)
@@ -76,15 +75,6 @@ errorCode 5 = "recv error"
 errorCode 6 = "existing record"
 errorCode 7 = "no record found"
 errorCode 9999 = "miscellaneous error"
-
-toStrict :: LS.ByteString -> S.ByteString
-toStrict = S.concat . LS.toChunks
-
-toLazy :: S.ByteString -> LS.ByteString
-toLazy s = LS.fromChunks [s]
-
-runPS :: Put -> S.ByteString
-runPS = toStrict . runPut
 
 length32 :: LS.ByteString -> Int32
 length32 s = fromIntegral $ LS.length s
@@ -141,8 +131,8 @@ openConnection hostname port = do
 closeConnection :: Socket -> IO ()
 closeConnection sock = sClose sock
 
-parseRetCode :: S.ByteString -> Int
-parseRetCode = BG.runGet getRetCode . toLazy
+parseRetCode :: LS.ByteString -> Int
+parseRetCode = BG.runGet getRetCode
 
 simpleSuccess sock = do
     rc <- recv sock 1
@@ -153,23 +143,23 @@ simpleSuccess sock = do
 -- | Store a record
 putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO (Either String String)
 putValue sock key value = do
-    let msg = runPS $ makePut key value
+    let msg = runPut $ makePut key value
     res <- send sock msg
     simpleSuccess sock
 
 -- | Retrieve a record
 getValue :: Socket -> LS.ByteString -> IO (Either String LS.ByteString)
 getValue sock key = do
-    let msg = runPS $ makeGet key
+    let msg = runPut $ makeGet key
     res <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
     case code of
         0 -> do
             vl <- recv sock 4
-            let valLen = parseLen vl
+            let valLen = (fromIntegral $ parseLen vl)::Int64
             rawValue <- recv sock valLen
-            return $ Right $ toLazy rawValue
+            return $ Right rawValue
         x -> return $ Left $ errorCode x
 
 -- | Store a record where the value is a double
@@ -200,7 +190,7 @@ putKeep :: Socket
            -> LS.ByteString
            -> IO (Either String String)
 putKeep sock key value = do
-    let msg = runPS $ makePutKeep key value
+    let msg = runPut $ makePutKeep key value
     res <- send sock msg
     simpleSuccess sock
 
@@ -210,21 +200,21 @@ putCat :: Socket
           -> LS.ByteString
           -> IO (Either String String)
 putCat sock key value = do
-    let msg = runPS $ makePutCat key value
+    let msg = runPut $ makePutCat key value
     sent <- send sock msg
     simpleSuccess sock
 
 -- | Remove a record
 out :: Socket -> LS.ByteString -> IO (Either String String)
 out sock key = do
-    let msg = runPS $ oneValPut C.out key
+    let msg = runPut $ oneValPut C.out key
     sent <- send sock msg
     simpleSuccess sock
 
 -- | Get the size of the value of a record
 vsiz :: Socket -> LS.ByteString -> IO (Either [Char] Int)
 vsiz sock key = do
-    let msg = runPS $ oneValPut C.vsiz key
+    let msg = runPut $ oneValPut C.vsiz key
     res <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
@@ -239,7 +229,7 @@ mget :: Socket
         -> [LS.ByteString]
         -> IO (Either [Char] [(LS.ByteString, LS.ByteString)])
 mget sock keys = do
-    let msg = toStrict . runPut $ mgetPut keys
+    let msg = runPut $ mgetPut keys
     res <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
@@ -267,23 +257,23 @@ getManyMGet :: (Num t) =>
 getManyMGet _ 0 acc = return acc
 getManyMGet sock rnum acc = do
     hdr <- recv sock 8
-    let (ksize, vsize) = BG.runGet getMGetHeader $ toLazy hdr
+    let (ksize, vsize) = BG.runGet getMGetHeader hdr
     body <- recv sock $ ksize + vsize
-    let el = BG.runGet (getOneMGet ksize vsize) $ toLazy body
+    let el = BG.runGet (getOneMGet ksize vsize) body
     getManyMGet sock (rnum-1) (el:acc)
 
-getMGetHeader :: Get (Int, Int)
+getMGetHeader :: Get (Int64, Int64)
 getMGetHeader = do
     rawksize <- BG.getWord32be
-    let ksize = (fromEnum rawksize)::Int
+    let ksize = (fromIntegral rawksize)::Int64
     rawvsize <- BG.getWord32be
-    let vsize = (fromEnum rawvsize)::Int
+    let vsize = (fromIntegral rawvsize)::Int64
     return (ksize, vsize)
     
-getOneMGet :: Int -> Int -> Get (LS.ByteString, LS.ByteString)
+getOneMGet :: Int64 -> Int64 -> Get (LS.ByteString, LS.ByteString)
 getOneMGet ksize vsize = do
-    k <- BG.getLazyByteString $ toEnum ksize
-    v <- BG.getLazyByteString $ toEnum vsize
+    k <- BG.getLazyByteString ksize
+    v <- BG.getLazyByteString vsize
     return (k, v)
 
 -- | Remove all records
@@ -296,14 +286,14 @@ sync sock = justCode sock C.sync
 
 justCode :: (Binary t) => Socket -> t -> IO (Either String String)
 justCode sock code = do
-    let msg = runPS $ (put C.magic >> put code)
+    let msg = runPut $ (put C.magic >> put code)
     sent <- send sock msg
     simpleSuccess sock
 
 -- | Copy the database file to the specified path
 copy :: Socket -> LS.ByteString -> IO (Either String String)
 copy sock path = do
-    let msg = runPS $ oneValPut C.copy path
+    let msg = runPut $ oneValPut C.copy path
     sent <- send sock msg
     simpleSuccess sock
 
@@ -313,7 +303,7 @@ addInt :: (Integral a) =>
 addInt sock key x = do
     let wx = (fromIntegral x)::Int32
     let klen = length32 key
-    let msg = runPS $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
+    let msg = runPut $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
     sent <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
@@ -332,14 +322,14 @@ parseSize = do
 
 sizeOrRNum :: (Binary t) => Socket -> t -> IO (Either [Char] Int)
 sizeOrRNum sock cmdId = do
-    let msg = runPS $ (put C.magic >> put cmdId)
+    let msg = runPut $ (put C.magic >> put cmdId)
     sent <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
     case code of
         0 -> do
             sizeraw <- recv sock 8
-            let size = BG.runGet parseSize $ toLazy sizeraw
+            let size = BG.runGet parseSize sizeraw
             return $ Right size
         x -> return $ Left $ errorCode x
 
@@ -352,17 +342,17 @@ rnum :: Socket -> IO (Either [Char] Int)
 rnum sock = sizeOrRNum sock C.rnum
 
 -- | Get the stats string
-stat :: Socket -> IO (Either [Char] [[S.ByteString]])
+stat :: Socket -> IO (Either [Char] [[LS.ByteString]])
 stat sock = do
-    sent <- send sock $ toStrict . runPut $ (put C.magic >> put C.stat)
+    sent <- send sock $ runPut $ (put C.magic >> put C.stat)
     rc <- recv sock 1
     let code = parseRetCode rc
     case code of
         0 -> do
             ssizRaw <- recv sock 4
-            let ssiz = parseLen ssizRaw
+            let ssiz = (fromIntegral $ parseLen ssizRaw)::Int64
             statRaw <- recv sock ssiz
-            let statPairs = map (S.split '\t') $ S.lines statRaw
+            let statPairs = map (LS.split '\t') $ LS.lines statRaw
             return $ Right statPairs
         x -> return $ Left $ errorCode x
 
@@ -373,7 +363,7 @@ restore sock path ts = do
     let pl = length32 path
     let ts64 = (fromIntegral ts)::Int64
     let restorePut = (put C.magic >> put C.restore >> put pl >> put ts64 >> putLazyByteString path)
-    sent <- send sock $ runPS restorePut
+    sent <- send sock $ runPut restorePut
     simpleSuccess sock
 
 setmstPut :: (Integral a) => LS.ByteString -> a -> PutM ()
@@ -386,7 +376,7 @@ setmstPut host port = do
 
 -- | Set the replication master
 setmst sock host port = do
-    sent <- send sock $ runPS $ setmstPut host port
+    sent <- send sock $ runPut $ setmstPut host port
     simpleSuccess sock
 
 integFract :: (RealFrac b) => b -> (Int64, Int64)
@@ -415,14 +405,14 @@ doublePut key integ fract = do
 -- | Add a real number to a record
 addDouble sock key num = do
     let (integ, fract) = integFract num
-    let msg = runPS $ doublePut key integ fract
+    let msg = runPut $ doublePut key integ fract
     sent <- send sock msg
     rc <- recv sock 1
     let code = parseRetCode rc
     case code of
         0 -> do
             fetch <- recv sock 16
-            let pair = BG.runGet parseAddDoubleReponse $ toLazy fetch
+            let pair = BG.runGet parseAddDoubleReponse fetch
             return . Right $ pairToDouble pair
         x -> return . Left $ errorCode x
 
@@ -444,7 +434,7 @@ putshl :: (Integral a) =>
           -> a              -- ^ width
           -> IO (Either String String)
 putshl sock key value width = do
-    let msg = runPS $ putshlPut key value width
+    let msg = runPut $ putshlPut key value width
     sent <- send sock msg
     simpleSuccess sock
 
@@ -454,14 +444,14 @@ putnrPut = makePuts C.putnr
 -- | store a record into a remote database object without response from the server
 putnr :: Socket -> LS.ByteString -> LS.ByteString -> IO ()
 putnr sock key value = do
-    let msg = runPS $ putnrPut key value
+    let msg = runPut $ putnrPut key value
     sent <- send sock msg
     return ()
 
 -- | initialize the iterator of a remote database object
 iterinit :: Socket -> IO (Either String String)
 iterinit sock = do
-    let msg = runPS $ (put C.magic >> put C.iterinit)
+    let msg = runPut $ (put C.magic >> put C.iterinit)
     sent <- send sock msg
     simpleSuccess sock
 
@@ -471,22 +461,22 @@ parseLenGet = do
     let c = (fromIntegral b)::Int
     return c
 
-parseLen :: S.ByteString -> Int
-parseLen s = BG.runGet parseLenGet $ toLazy s
+parseLen :: LS.ByteString -> Int
+parseLen s = BG.runGet parseLenGet s
 
 -- | get the next key of the iterator of a remote database object
 iternext :: Socket -> IO (Either [Char] LS.ByteString)
 iternext sock = do  
-    let msg = runPS $ (put C.magic >> put C.iternext)
+    let msg = runPut $ (put C.magic >> put C.iternext)
     sent <- send sock msg
     rawCode <- recv sock 1
     case (parseRetCode rawCode) of
         0 -> do
             ksizRaw <- recv sock 4
-            let ksiz = parseLen ksizRaw
+            let ksiz = (fromIntegral $ parseLen ksizRaw)::Int64
             kbuf <- recv sock ksiz 
             let klen = (fromIntegral ksiz)::Int64
-            let key = BG.runGet (BG.getLazyByteString klen) $ toLazy kbuf
+            let key = BG.runGet (BG.getLazyByteString klen) $ kbuf
             return $ Right key
         x -> return $ Left $ errorCode x
 
@@ -502,7 +492,7 @@ fwmkeysPut prefix maxKeys = do
 fwmkeys :: (Integral a) =>
            Socket -> LS.ByteString -> a -> IO (Either [Char] [LS.ByteString])
 fwmkeys sock prefix maxKeys = do
-    let msg = runPS $ fwmkeysPut prefix maxKeys
+    let msg = runPut $ fwmkeysPut prefix maxKeys
     sent <- send sock msg
     rawCode <- recv sock 1
     case (parseRetCode rawCode) of
@@ -517,9 +507,9 @@ getManyElements :: (Num t) => Socket -> t -> [LS.ByteString] -> IO [LS.ByteStrin
 getManyElements _ 0 acc = return acc
 getManyElements sock knum acc = do
     klenRaw <- recv sock 4
-    let klen = parseLen klenRaw
+    let klen = (fromIntegral $ parseLen klenRaw)::Int64
     keyRaw <- recv sock klen
-    let key = BG.runGet (BG.getLazyByteString $ toEnum klen) $ toLazy keyRaw
+    let key = BG.runGet (BG.getLazyByteString klen) keyRaw
     getManyElements sock (knum-1) (key:acc)
     
 extPut :: LS.ByteString
@@ -541,11 +531,11 @@ optOr :: [TyrantOption] -> Int32
 optOr [] = 0
 optOr opts = foldl1 (.|.) $ map optToInt32 opts
 
-readLazy :: Int -> S.ByteString -> LS.ByteString
-readLazy nb s = BG.runGet (BG.getLazyByteString $ toEnum nb) $ toLazy s
+readLazy :: Int64 -> LS.ByteString -> LS.ByteString
+readLazy nb s = BG.runGet (BG.getLazyByteString nb) s
 
-parseCode :: S.ByteString -> Int
-parseCode s = BG.runGet getRetCode $ toLazy s
+parseCode :: LS.ByteString -> Int
+parseCode s = BG.runGet getRetCode s
 
 -- | Call a function of the script language extension
 ext :: Socket               -- ^ Connection to Tokyo Tyrant
@@ -555,13 +545,13 @@ ext :: Socket               -- ^ Connection to Tokyo Tyrant
        -> [TyrantOption]    -- ^ locking and update log options
        -> IO (Either [Char] LS.ByteString)
 ext sock funcname key value opts = do
-    let msg = runPS $ extPut funcname key value $ optOr opts
+    let msg = runPut $ extPut funcname key value $ optOr opts
     sent <- send sock msg
     rc <- recv sock 1
     case (parseCode rc) of
         0 -> do
             rsizRaw <- recv sock 4
-            let rsiz = parseLen rsizRaw
+            let rsiz = (fromIntegral $ parseLen rsizRaw)::Int64
             rbuf <- recv sock rsiz
             let result = readLazy rsiz rbuf
             return $ Right result
@@ -586,7 +576,7 @@ misc :: Socket              -- ^ Connection to Tokyo Tyrant
         -> [TyrantOption]   -- ^ options
         -> IO (Either [Char] [LS.ByteString])
 misc sock funcname args opts = do
-    let msg = runPS $ miscPut funcname args $ optOr opts
+    let msg = runPut $ miscPut funcname args $ optOr opts
     sent <- send sock msg
     rc <- recv sock 1
     let rcp = parseCode rc
