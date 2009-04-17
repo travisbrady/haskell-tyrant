@@ -10,6 +10,7 @@
 --
 module Database.TokyoTyrant 
     (TyrantOption(RecordLocking, GlobalLocking, NoUpdateLog)
+    ,TokyoTyrantHandle
     ,openConnection
     ,closeConnection
     ,putValue
@@ -57,6 +58,14 @@ data TyrantOption = RecordLocking   -- `RDBXOLCKREC' for record locking
                     | GlobalLocking -- `RDBXOLCKGLB' for global locking
                     | NoUpdateLog   -- `RDBMONOULOG' for omission of the update log
     deriving (Eq, Show)
+
+newtype TokyoTyrantHandle = TokyoTyrantHandle Socket
+
+ttsend :: TokyoTyrantHandle -> LS.ByteString -> IO Int64
+ttsend (TokyoTyrantHandle sock) str = send sock str
+
+ttrecv :: TokyoTyrantHandle -> Int64 -> IO LS.ByteString
+ttrecv (TokyoTyrantHandle sock) len = recv sock len
 
 -- | Convert TyrantOption type to Int32
 optToInt32 :: TyrantOption -> Int32
@@ -118,126 +127,126 @@ getRetCode = do
     return ret
 
 -- | Connect to Tokyo Tyrant
-openConnection :: HostName -> ServiceName -> IO Socket
+openConnection :: HostName -> ServiceName -> IO TokyoTyrantHandle
 openConnection hostname port = do
     addrinfos <- getAddrInfo Nothing (Just hostname) (Just port)
     let addr = head addrinfos
     sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
     setSocketOption sock NoDelay 1
     connect sock (addrAddress addr)
-    return sock
+    return $ TokyoTyrantHandle sock
 
 -- | Close connection to ttserver
-closeConnection :: Socket -> IO ()
-closeConnection sock = sClose sock
+closeConnection :: TokyoTyrantHandle -> IO ()
+closeConnection (TokyoTyrantHandle sock) = sClose sock
 
 parseRetCode :: LS.ByteString -> Int
 parseRetCode = BG.runGet getRetCode
 
-simpleSuccess sock = do
+simpleSuccess (TokyoTyrantHandle sock) = do
     rc <- recv sock 1
     case (parseRetCode rc) of
         0 -> return . Right $ errorCode 0
         x -> return . Left $ errorCode x
 
 -- | Store a record
-putValue :: Socket -> LS.ByteString -> LS.ByteString -> IO (Either String String)
-putValue sock key value = do
+putValue :: TokyoTyrantHandle -> LS.ByteString -> LS.ByteString -> IO (Either String String)
+putValue handle key value = do
     let msg = runPut $ makePut key value
-    res <- send sock msg
-    simpleSuccess sock
+    res <- ttsend handle msg
+    simpleSuccess handle
 
 -- | Retrieve a record
-getValue :: Socket -> LS.ByteString -> IO (Either String LS.ByteString)
-getValue sock key = do
+getValue :: TokyoTyrantHandle -> LS.ByteString -> IO (Either String LS.ByteString)
+getValue handle key = do
     let msg = runPut $ makeGet key
-    res <- send sock msg
-    rc <- recv sock 1
+    res <- ttsend handle msg
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            vl <- recv sock 4
+            vl <- ttrecv handle 4
             let valLen = (fromIntegral $ parseLen vl)::Int64
-            rawValue <- recv sock valLen
+            rawValue <- ttrecv handle valLen
             return $ Right rawValue
         x -> return $ Left $ errorCode x
 
 -- | Store a record where the value is a double
-putDouble :: Socket -> LS.ByteString -> Double -> IO (Either [Char] Double)
-putDouble sock key value = do
-    out sock key
-    addDouble sock key value
+putDouble :: TokyoTyrantHandle -> LS.ByteString -> Double -> IO (Either [Char] Double)
+putDouble handle key value = do
+    out handle key
+    addDouble handle key value
 
-getDouble :: Socket -> LS.ByteString -> IO (Either [Char] Double)
-getDouble sock key = do 
-    addDouble sock key 0.0
+getDouble :: TokyoTyrantHandle -> LS.ByteString -> IO (Either [Char] Double)
+getDouble handle key = do 
+    addDouble handle key 0.0
 
 -- | Store a record with an Int value
-putInt :: Socket -> LS.ByteString -> Int -> IO (Either [Char] Int)
-putInt sock key value = do
-    out sock key
-    addInt sock key value
+putInt :: TokyoTyrantHandle -> LS.ByteString -> Int -> IO (Either [Char] Int)
+putInt handle key value = do
+    out handle key
+    addInt handle key value
 
 -- | Retrieve a record with an Int value
-getInt :: Socket -> LS.ByteString -> IO (Either [Char] Int)
-getInt sock key = do
-    addInt sock key 0
+getInt :: TokyoTyrantHandle -> LS.ByteString -> IO (Either [Char] Int)
+getInt handle key = do
+    addInt handle key 0
 
 -- | Store a new record
 --   If key already exists nothing is done
-putKeep :: Socket
+putKeep :: TokyoTyrantHandle
            -> LS.ByteString
            -> LS.ByteString
            -> IO (Either String String)
-putKeep sock key value = do
+putKeep handle key value = do
     let msg = runPut $ makePutKeep key value
-    res <- send sock msg
-    simpleSuccess sock
+    res <- ttsend handle msg
+    simpleSuccess handle
 
 -- | Concatenate a value at the end of the existing record
-putCat :: Socket
+putCat :: TokyoTyrantHandle
           -> LS.ByteString
           -> LS.ByteString
           -> IO (Either String String)
-putCat sock key value = do
+putCat handle key value = do
     let msg = runPut $ makePutCat key value
-    sent <- send sock msg
-    simpleSuccess sock
+    sent <- ttsend handle msg
+    simpleSuccess handle
 
 -- | Remove a record
-out :: Socket -> LS.ByteString -> IO (Either String String)
-out sock key = do
+out :: TokyoTyrantHandle -> LS.ByteString -> IO (Either String String)
+out handle key = do
     let msg = runPut $ oneValPut C.out key
-    sent <- send sock msg
-    simpleSuccess sock
+    sent <- ttsend handle msg
+    simpleSuccess handle
 
 -- | Get the size of the value of a record
-vsiz :: Socket -> LS.ByteString -> IO (Either [Char] Int)
-vsiz sock key = do
+vsiz :: TokyoTyrantHandle -> LS.ByteString -> IO (Either [Char] Int)
+vsiz handle key = do
     let msg = runPut $ oneValPut C.vsiz key
-    res <- send sock msg
-    rc <- recv sock 1
+    res <- ttsend handle msg
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            fetch <- recv sock 4
+            fetch <- ttrecv handle 4
             return $ Right $ parseLen fetch
         x -> return $ Left $ errorCode x
 
 -- | Fetch keys and values for multiple records
-mget :: Socket
+mget :: TokyoTyrantHandle
         -> [LS.ByteString]
         -> IO (Either [Char] [(LS.ByteString, LS.ByteString)])
-mget sock keys = do
+mget handle keys = do
     let msg = runPut $ mgetPut keys
-    res <- send sock msg
-    rc <- recv sock 1
+    res <- ttsend handle msg
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            rnumRaw <- recv sock 4
+            rnumRaw <- ttrecv handle 4
             let rnum = parseLen rnumRaw
-            pairs <- getManyMGet sock rnum []
+            pairs <- getManyMGet handle rnum []
             return $ Right pairs
         x -> return $ Left $ errorCode x
 
@@ -250,17 +259,17 @@ mgetPut keys = do
     where nkeys = len32 keys
 
 getManyMGet :: (Num t) =>
-               Socket
+               TokyoTyrantHandle
                -> t
                -> [(LS.ByteString, LS.ByteString)]
                -> IO [(LS.ByteString, LS.ByteString)]
 getManyMGet _ 0 acc = return acc
-getManyMGet sock rnum acc = do
-    hdr <- recv sock 8
+getManyMGet handle rnum acc = do
+    hdr <- ttrecv handle 8
     let (ksize, vsize) = BG.runGet getMGetHeader hdr
-    body <- recv sock $ ksize + vsize
+    body <- ttrecv handle $ ksize + vsize
     let el = BG.runGet (getOneMGet ksize vsize) body
-    getManyMGet sock (rnum-1) (el:acc)
+    getManyMGet handle (rnum-1) (el:acc)
 
 getMGetHeader :: Get (Int64, Int64)
 getMGetHeader = do
@@ -277,39 +286,39 @@ getOneMGet ksize vsize = do
     return (k, v)
 
 -- | Remove all records
-vanish :: Socket -> IO (Either String String)
-vanish sock  = justCode sock C.vanish
+vanish :: TokyoTyrantHandle -> IO (Either String String)
+vanish handle = justCode handle C.vanish
 
 -- | Synchronize updated contents with the database file
-sync :: Socket -> IO (Either String String)
-sync sock = justCode sock C.sync
+sync :: TokyoTyrantHandle -> IO (Either String String)
+sync handle = justCode handle C.sync
 
-justCode :: (Binary t) => Socket -> t -> IO (Either String String)
-justCode sock code = do
+justCode :: (Binary t) => TokyoTyrantHandle -> t -> IO (Either String String)
+justCode handle code = do
     let msg = runPut $ (put C.magic >> put code)
-    sent <- send sock msg
-    simpleSuccess sock
+    sent <- ttsend handle msg
+    simpleSuccess handle
 
 -- | Copy the database file to the specified path
-copy :: Socket -> LS.ByteString -> IO (Either String String)
-copy sock path = do
+copy :: TokyoTyrantHandle -> LS.ByteString -> IO (Either String String)
+copy handle path = do
     let msg = runPut $ oneValPut C.copy path
-    sent <- send sock msg
-    simpleSuccess sock
+    sent <- ttsend handle msg
+    simpleSuccess handle 
 
 -- | Add an integer to a record
 addInt :: (Integral a) =>
-          Socket -> LS.ByteString -> a -> IO (Either [Char] Int)
-addInt sock key x = do
+          TokyoTyrantHandle -> LS.ByteString -> a -> IO (Either [Char] Int)
+addInt handle key x = do
     let wx = (fromIntegral x)::Int32
     let klen = length32 key
-    let msg = runPut $ (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
-    sent <- send sock msg
-    rc <- recv sock 1
+    let msg = runPut (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
+    sent <- ttsend handle msg
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            sumraw <- recv sock 4
+            sumraw <- ttrecv handle 4
             let thesum = parseLen sumraw
             return $ Right thesum
         x -> return $ Left $ errorCode x
@@ -320,51 +329,51 @@ parseSize = do
     let size = (fromEnum rawSize)::Int
     return size
 
-sizeOrRNum :: (Binary t) => Socket -> t -> IO (Either [Char] Int)
-sizeOrRNum sock cmdId = do
-    let msg = runPut $ (put C.magic >> put cmdId)
-    sent <- send sock msg
-    rc <- recv sock 1
+sizeOrRNum :: (Binary t) => TokyoTyrantHandle -> t -> IO (Either [Char] Int)
+sizeOrRNum handle cmdId = do
+    let msg = runPut (put C.magic >> put cmdId)
+    sent <- ttsend handle msg
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            sizeraw <- recv sock 8
+            sizeraw <- ttrecv handle 8
             let size = BG.runGet parseSize sizeraw
             return $ Right size
         x -> return $ Left $ errorCode x
 
 -- | Get the size of the database
-size :: Socket -> IO (Either [Char] Int)
-size sock = sizeOrRNum sock C.size
+size :: TokyoTyrantHandle -> IO (Either [Char] Int)
+size handle = sizeOrRNum handle C.size
 
 -- | Get the number of records
-rnum :: Socket -> IO (Either [Char] Int)
-rnum sock = sizeOrRNum sock C.rnum
+rnum :: TokyoTyrantHandle -> IO (Either [Char] Int)
+rnum handle = sizeOrRNum handle C.rnum
 
 -- | Get the stats string
-stat :: Socket -> IO (Either [Char] [[LS.ByteString]])
-stat sock = do
-    sent <- send sock $ runPut $ (put C.magic >> put C.stat)
-    rc <- recv sock 1
+stat :: TokyoTyrantHandle -> IO (Either [Char] [[LS.ByteString]])
+stat handle = do
+    sent <- ttsend handle $ runPut (put C.magic >> put C.stat)
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            ssizRaw <- recv sock 4
+            ssizRaw <- ttrecv handle 4
             let ssiz = (fromIntegral $ parseLen ssizRaw)::Int64
-            statRaw <- recv sock ssiz
+            statRaw <- ttrecv handle ssiz
             let statPairs = map (LS.split '\t') $ LS.lines statRaw
             return $ Right statPairs
         x -> return $ Left $ errorCode x
 
 -- | Restore the database with update log
 restore :: (Integral a) =>
-           Socket -> LS.ByteString -> a -> IO (Either String String)
-restore sock path ts = do
+           TokyoTyrantHandle -> LS.ByteString -> a -> IO (Either String String)
+restore handle path ts = do
     let pl = length32 path
     let ts64 = (fromIntegral ts)::Int64
     let restorePut = (put C.magic >> put C.restore >> put pl >> put ts64 >> putLazyByteString path)
-    sent <- send sock $ runPut restorePut
-    simpleSuccess sock
+    sent <- ttsend handle $ runPut restorePut
+    simpleSuccess handle 
 
 setmstPut :: (Integral a) => LS.ByteString -> a -> PutM ()
 setmstPut host port = do
@@ -375,9 +384,9 @@ setmstPut host port = do
           port32 = (fromIntegral port)::Int32
 
 -- | Set the replication master
-setmst sock host port = do
-    sent <- send sock $ runPut $ setmstPut host port
-    simpleSuccess sock
+setmst handle host port = do
+    sent <- ttsend handle $ runPut $ setmstPut host port
+    simpleSuccess handle 
 
 integFract :: (RealFrac b) => b -> (Int64, Int64)
 integFract num = (integ, fract)
@@ -403,15 +412,15 @@ doublePut key integ fract = do
     where klen = length32 key
 
 -- | Add a real number to a record
-addDouble sock key num = do
+addDouble handle key num = do
     let (integ, fract) = integFract num
     let msg = runPut $ doublePut key integ fract
-    sent <- send sock msg
-    rc <- recv sock 1
+    sent <- ttsend handle msg
+    rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
         0 -> do
-            fetch <- recv sock 16
+            fetch <- ttrecv handle 16
             let pair = BG.runGet parseAddDoubleReponse fetch
             return . Right $ pairToDouble pair
         x -> return . Left $ errorCode x
@@ -428,32 +437,32 @@ putshlPut key value width = do
 
 -- | concatenate a value at the end of the existing record and shift it to the lef
 putshl :: (Integral a) =>
-          Socket            -- ^ Connection
+          TokyoTyrantHandle            -- ^ Connection
           -> LS.ByteString  -- ^ key
           -> LS.ByteString  -- ^ value
           -> a              -- ^ width
           -> IO (Either String String)
-putshl sock key value width = do
+putshl handle key value width = do
     let msg = runPut $ putshlPut key value width
-    sent <- send sock msg
-    simpleSuccess sock
+    sent <- ttsend handle msg
+    simpleSuccess handle
 
 putnrPut :: LS.ByteString -> LS.ByteString -> Put
 putnrPut = makePuts C.putnr
 
 -- | store a record into a remote database object without response from the server
-putnr :: Socket -> LS.ByteString -> LS.ByteString -> IO ()
-putnr sock key value = do
+putnr :: TokyoTyrantHandle -> LS.ByteString -> LS.ByteString -> IO ()
+putnr handle key value = do
     let msg = runPut $ putnrPut key value
-    sent <- send sock msg
+    sent <- ttsend handle msg
     return ()
 
 -- | initialize the iterator of a remote database object
-iterinit :: Socket -> IO (Either String String)
-iterinit sock = do
+iterinit :: TokyoTyrantHandle -> IO (Either String String)
+iterinit handle = do
     let msg = runPut $ (put C.magic >> put C.iterinit)
-    sent <- send sock msg
-    simpleSuccess sock
+    sent <- ttsend handle msg
+    simpleSuccess handle
 
 parseLenGet :: Get Int
 parseLenGet = do
@@ -465,16 +474,16 @@ parseLen :: LS.ByteString -> Int
 parseLen s = BG.runGet parseLenGet s
 
 -- | get the next key of the iterator of a remote database object
-iternext :: Socket -> IO (Either [Char] LS.ByteString)
-iternext sock = do  
+iternext :: TokyoTyrantHandle -> IO (Either [Char] LS.ByteString)
+iternext handle = do
     let msg = runPut $ (put C.magic >> put C.iternext)
-    sent <- send sock msg
-    rawCode <- recv sock 1
+    sent <- ttsend handle msg
+    rawCode <- ttrecv handle 1
     case (parseRetCode rawCode) of
         0 -> do
-            ksizRaw <- recv sock 4
+            ksizRaw <- ttrecv handle 4
             let ksiz = (fromIntegral $ parseLen ksizRaw)::Int64
-            kbuf <- recv sock ksiz 
+            kbuf <- ttrecv handle ksiz
             let klen = (fromIntegral ksiz)::Int64
             let key = BG.runGet (BG.getLazyByteString klen) $ kbuf
             return $ Right key
@@ -490,27 +499,27 @@ fwmkeysPut prefix maxKeys = do
 
 -- | get forward matching keys in a remote database object
 fwmkeys :: (Integral a) =>
-           Socket -> LS.ByteString -> a -> IO (Either [Char] [LS.ByteString])
-fwmkeys sock prefix maxKeys = do
+           TokyoTyrantHandle -> LS.ByteString -> a -> IO (Either [Char] [LS.ByteString])
+fwmkeys handle prefix maxKeys = do
     let msg = runPut $ fwmkeysPut prefix maxKeys
-    sent <- send sock msg
-    rawCode <- recv sock 1
+    sent <- ttsend handle msg
+    rawCode <- ttrecv handle 1
     case (parseRetCode rawCode) of
         0 -> do
-            knumRaw <- recv sock 4
+            knumRaw <- ttrecv handle 4
             let knum = parseLen knumRaw
-            theKeys <- getManyElements sock knum []
+            theKeys <- getManyElements handle knum []
             return $ Right theKeys
         x -> return $ Left $ errorCode x
 
-getManyElements :: (Num t) => Socket -> t -> [LS.ByteString] -> IO [LS.ByteString]
+getManyElements :: (Num t) => TokyoTyrantHandle -> t -> [LS.ByteString] -> IO [LS.ByteString]
 getManyElements _ 0 acc = return acc
-getManyElements sock knum acc = do
-    klenRaw <- recv sock 4
+getManyElements handle knum acc = do
+    klenRaw <- ttrecv handle 4
     let klen = (fromIntegral $ parseLen klenRaw)::Int64
-    keyRaw <- recv sock klen
+    keyRaw <- ttrecv handle klen
     let key = BG.runGet (BG.getLazyByteString klen) keyRaw
-    getManyElements sock (knum-1) (key:acc)
+    getManyElements handle (knum-1) (key:acc)
     
 extPut :: LS.ByteString
           -> LS.ByteString
@@ -538,21 +547,21 @@ parseCode :: LS.ByteString -> Int
 parseCode s = BG.runGet getRetCode s
 
 -- | Call a function of the script language extension
-ext :: Socket               -- ^ Connection to Tokyo Tyrant
+ext :: TokyoTyrantHandle               -- ^ Connection to Tokyo Tyrant
        -> LS.ByteString     -- ^ the lua function to be called
        -> LS.ByteString     -- ^ specifies the key
        -> LS.ByteString     -- ^ specified the value
        -> [TyrantOption]    -- ^ locking and update log options
        -> IO (Either [Char] LS.ByteString)
-ext sock funcname key value opts = do
+ext handle funcname key value opts = do
     let msg = runPut $ extPut funcname key value $ optOr opts
-    sent <- send sock msg
-    rc <- recv sock 1
+    sent <- ttsend handle msg
+    rc <- ttrecv handle 1
     case (parseCode rc) of
         0 -> do
-            rsizRaw <- recv sock 4
+            rsizRaw <- ttrecv handle 4
             let rsiz = (fromIntegral $ parseLen rsizRaw)::Int64
-            rbuf <- recv sock rsiz
+            rbuf <- ttrecv handle rsiz
             let result = readLazy rsiz rbuf
             return $ Right result
         x -> return $ Left $ errorCode x
@@ -570,21 +579,21 @@ miscPut funcname args opts = do
 -- getlist takes a list of keys and returns a list of values
 -- putlist takes a list of keys and values one after the other and returns []
 -- outlist takes a list of keys and removes those records
-misc :: Socket              -- ^ Connection to Tokyo Tyrant
+misc :: TokyoTyrantHandle              -- ^ Connection to Tokyo Tyrant
         -> LS.ByteString    -- ^ funcname
         -> [LS.ByteString]  -- ^ args
         -> [TyrantOption]   -- ^ options
         -> IO (Either [Char] [LS.ByteString])
-misc sock funcname args opts = do
+misc handle funcname args opts = do
     let msg = runPut $ miscPut funcname args $ optOr opts
-    sent <- send sock msg
-    rc <- recv sock 1
+    sent <- ttsend handle msg
+    rc <- ttrecv handle 1
     let rcp = parseCode rc
     case rcp of
         0 -> do
-            rnumRaw <- recv sock 4
+            rnumRaw <- ttrecv handle 4
             let rnum = parseLen rnumRaw
-            elements <- getManyElements sock rnum []
+            elements <- getManyElements handle rnum []
             return $ Right elements
         x -> return $ Left $ errorCode x
 
