@@ -126,10 +126,12 @@ getRetCode = do
     let ret = (fromEnum rawCode)::Int
     return ret
 
+tcpHints = defaultHints {addrFamily = AF_INET, addrProtocol = 6}
+
 -- | Connect to Tokyo Tyrant
 openConnection :: HostName -> ServiceName -> IO TokyoTyrantHandle
 openConnection hostname port = do
-    addrinfos <- getAddrInfo Nothing (Just hostname) (Just port)
+    addrinfos <- getAddrInfo (Just tcpHints) (Just hostname) (Just port)
     let addr = head addrinfos
     sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
     setSocketOption sock NoDelay 1
