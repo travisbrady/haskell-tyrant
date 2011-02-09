@@ -53,6 +53,15 @@ testputDouble conn = do
     pd <- putDouble conn (LS.pack "k1") 999.9
     print pd
 
+-- Put and get a 128 kB string. Will require multiple send/recv operations when
+-- going to a server on a remote host.
+testLarge conn = do
+  let bigStr = LS.pack $ replicate (1024*128) '@'
+  ret <- putValue conn (LS.pack "bigStr") bigStr
+  print ret
+  gval <- getValue conn (LS.pack "bigStr")
+  print $ gval == (Right bigStr)
+
 main = do
     s <- openConnection "localhost" "1978"
     let outPath = LS.pack "hogo.tch"
@@ -100,4 +109,5 @@ main = do
     areTheyGone <- vanish s
     print areTheyGone
     testputDouble s
+    testLarge s
     closeConnection s
