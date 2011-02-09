@@ -1,5 +1,5 @@
 Name:           haskell-tyrant
-Version:        0.2
+Version:        0.3
 Cabal-Version:  >= 1.2
 Build-Type:     Simple
 License:        BSD3
