@@ -44,7 +44,10 @@ module Database.TokyoTyrant
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString.Lazy
+import qualified Network.Socket.ByteString as SN
 import qualified Data.ByteString.Lazy.Char8 as LS
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy.Internal as LS
 import Data.Binary
 import qualified Data.Binary.Get as BG
 import Data.Binary.Put (runPut, putLazyByteString, PutM)
@@ -66,15 +69,15 @@ ttsend (TokyoTyrantHandle sock) str = sendAll sock str
 
 ttrecv :: TokyoTyrantHandle -> Int64 -> IO LS.ByteString
 ttrecv (TokyoTyrantHandle sock) len = recv' len
-    where recv' 0 = return LS.empty
+    where recv' 0 = return LS.Empty
           recv' n = do 
-            chunk <- recv sock (min n 1024)
-            let n' = n - LS.length chunk
+            chunk <- SN.recv sock (fromIntegral (min n 1024))
+            let n' = n - (fromIntegral $ B.length chunk)
             if n' == n
               then ioError $ userError $ "Could not read " ++ (show len) ++ 
                        " bytes from tokyo tyrant; server disconnect."
               else
-                  recv' n' >>= return . (LS.append chunk)
+                  recv' n' >>= return . (LS.Chunk chunk)
 
 -- | Convert TyrantOption type to Int32
 optToInt32 :: TyrantOption -> Int32
