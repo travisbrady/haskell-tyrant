@@ -1,5 +1,5 @@
 Name:           haskell-tyrant
-Version:        0.2
+Version:        0.3
 Cabal-Version:  >= 1.2
 Build-Type:     Simple
 License:        BSD3
@@ -21,7 +21,7 @@ Library
     Other-Modules:
         Database.TokyoTyrant.Constants
     Build-Depends: 
-        base,
+        base >= 4, base < 5,
         network,
         binary, 
         bytestring, 

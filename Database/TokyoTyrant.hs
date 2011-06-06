@@ -44,7 +44,10 @@ module Database.TokyoTyrant
 
 import Network.Socket hiding (send, sendTo, recv, recvFrom)
 import Network.Socket.ByteString.Lazy
+import qualified Network.Socket.ByteString as SN
 import qualified Data.ByteString.Lazy.Char8 as LS
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy.Internal as LS
 import Data.Binary
 import qualified Data.Binary.Get as BG
 import Data.Binary.Put (runPut, putLazyByteString, PutM)
@@ -61,11 +64,20 @@ data TyrantOption = RecordLocking   -- `RDBXOLCKREC' for record locking
 
 newtype TokyoTyrantHandle = TokyoTyrantHandle Socket
 
-ttsend :: TokyoTyrantHandle -> LS.ByteString -> IO Int64
-ttsend (TokyoTyrantHandle sock) str = send sock str
+ttsend :: TokyoTyrantHandle -> LS.ByteString -> IO ()
+ttsend (TokyoTyrantHandle sock) str = sendAll sock str
 
 ttrecv :: TokyoTyrantHandle -> Int64 -> IO LS.ByteString
-ttrecv (TokyoTyrantHandle sock) len = recv sock len
+ttrecv (TokyoTyrantHandle sock) len = recv' len
+    where recv' 0 = return LS.Empty
+          recv' n = do 
+            chunk <- SN.recv sock (fromIntegral (min n 1024))
+            let n' = n - (fromIntegral $ B.length chunk)
+            if n' == n
+              then ioError $ userError $ "Could not read " ++ (show len) ++ 
+                       " bytes from tokyo tyrant; server disconnect."
+              else
+                  recv' n' >>= return . (LS.Chunk chunk)
 
 -- | Convert TyrantOption type to Int32
 optToInt32 :: TyrantOption -> Int32
@@ -155,14 +167,14 @@ simpleSuccess (TokyoTyrantHandle sock) = do
 putValue :: TokyoTyrantHandle -> LS.ByteString -> LS.ByteString -> IO (Either String String)
 putValue handle key value = do
     let msg = runPut $ makePut key value
-    res <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 -- | Retrieve a record
 getValue :: TokyoTyrantHandle -> LS.ByteString -> IO (Either String LS.ByteString)
 getValue handle key = do
     let msg = runPut $ makeGet key
-    res <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -202,7 +214,7 @@ putKeep :: TokyoTyrantHandle
            -> IO (Either String String)
 putKeep handle key value = do
     let msg = runPut $ makePutKeep key value
-    res <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 -- | Concatenate a value at the end of the existing record
@@ -212,21 +224,21 @@ putCat :: TokyoTyrantHandle
           -> IO (Either String String)
 putCat handle key value = do
     let msg = runPut $ makePutCat key value
-    sent <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 -- | Remove a record
 out :: TokyoTyrantHandle -> LS.ByteString -> IO (Either String String)
 out handle key = do
     let msg = runPut $ oneValPut C.out key
-    sent <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 -- | Get the size of the value of a record
 vsiz :: TokyoTyrantHandle -> LS.ByteString -> IO (Either [Char] Int)
 vsiz handle key = do
     let msg = runPut $ oneValPut C.vsiz key
-    res <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -241,7 +253,7 @@ mget :: TokyoTyrantHandle
         -> IO (Either [Char] [(LS.ByteString, LS.ByteString)])
 mget handle keys = do
     let msg = runPut $ mgetPut keys
-    res <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -298,14 +310,14 @@ sync handle = justCode handle C.sync
 justCode :: (Binary t) => TokyoTyrantHandle -> t -> IO (Either String String)
 justCode handle code = do
     let msg = runPut $ (put C.magic >> put code)
-    sent <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 -- | Copy the database file to the specified path
 copy :: TokyoTyrantHandle -> LS.ByteString -> IO (Either String String)
 copy handle path = do
     let msg = runPut $ oneValPut C.copy path
-    sent <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle 
 
 -- | Add an integer to a record
@@ -315,7 +327,7 @@ addInt handle key x = do
     let wx = (fromIntegral x)::Int32
     let klen = length32 key
     let msg = runPut (put C.magic >> put C.addint >> put klen >> put wx >> putLazyByteString key)
-    sent <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -334,7 +346,7 @@ parseSize = do
 sizeOrRNum :: (Binary t) => TokyoTyrantHandle -> t -> IO (Either [Char] Int)
 sizeOrRNum handle cmdId = do
     let msg = runPut (put C.magic >> put cmdId)
-    sent <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -355,7 +367,7 @@ rnum handle = sizeOrRNum handle C.rnum
 -- | Get the stats string
 stat :: TokyoTyrantHandle -> IO (Either [Char] [[LS.ByteString]])
 stat handle = do
-    sent <- ttsend handle $ runPut (put C.magic >> put C.stat)
+    ttsend handle $ runPut (put C.magic >> put C.stat)
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -374,7 +386,7 @@ restore handle path ts = do
     let pl = length32 path
     let ts64 = (fromIntegral ts)::Int64
     let restorePut = (put C.magic >> put C.restore >> put pl >> put ts64 >> putLazyByteString path)
-    sent <- ttsend handle $ runPut restorePut
+    ttsend handle $ runPut restorePut
     simpleSuccess handle 
 
 setmstPut :: (Integral a) => LS.ByteString -> a -> PutM ()
@@ -387,7 +399,7 @@ setmstPut host port = do
 
 -- | Set the replication master
 setmst handle host port = do
-    sent <- ttsend handle $ runPut $ setmstPut host port
+    ttsend handle $ runPut $ setmstPut host port
     simpleSuccess handle 
 
 integFract :: (RealFrac b) => b -> (Int64, Int64)
@@ -417,7 +429,7 @@ doublePut key integ fract = do
 addDouble handle key num = do
     let (integ, fract) = integFract num
     let msg = runPut $ doublePut key integ fract
-    sent <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let code = parseRetCode rc
     case code of
@@ -446,7 +458,7 @@ putshl :: (Integral a) =>
           -> IO (Either String String)
 putshl handle key value width = do
     let msg = runPut $ putshlPut key value width
-    sent <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 putnrPut :: LS.ByteString -> LS.ByteString -> Put
@@ -456,14 +468,14 @@ putnrPut = makePuts C.putnr
 putnr :: TokyoTyrantHandle -> LS.ByteString -> LS.ByteString -> IO ()
 putnr handle key value = do
     let msg = runPut $ putnrPut key value
-    sent <- ttsend handle msg
+    ttsend handle msg
     return ()
 
 -- | initialize the iterator of a remote database object
 iterinit :: TokyoTyrantHandle -> IO (Either String String)
 iterinit handle = do
     let msg = runPut $ (put C.magic >> put C.iterinit)
-    sent <- ttsend handle msg
+    ttsend handle msg
     simpleSuccess handle
 
 parseLenGet :: Get Int
@@ -479,7 +491,7 @@ parseLen s = BG.runGet parseLenGet s
 iternext :: TokyoTyrantHandle -> IO (Either [Char] LS.ByteString)
 iternext handle = do
     let msg = runPut $ (put C.magic >> put C.iternext)
-    sent <- ttsend handle msg
+    ttsend handle msg
     rawCode <- ttrecv handle 1
     case (parseRetCode rawCode) of
         0 -> do
@@ -504,7 +516,7 @@ fwmkeys :: (Integral a) =>
            TokyoTyrantHandle -> LS.ByteString -> a -> IO (Either [Char] [LS.ByteString])
 fwmkeys handle prefix maxKeys = do
     let msg = runPut $ fwmkeysPut prefix maxKeys
-    sent <- ttsend handle msg
+    ttsend handle msg
     rawCode <- ttrecv handle 1
     case (parseRetCode rawCode) of
         0 -> do
@@ -557,7 +569,7 @@ ext :: TokyoTyrantHandle               -- ^ Connection to Tokyo Tyrant
        -> IO (Either [Char] LS.ByteString)
 ext handle funcname key value opts = do
     let msg = runPut $ extPut funcname key value $ optOr opts
-    sent <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     case (parseCode rc) of
         0 -> do
@@ -588,7 +600,7 @@ misc :: TokyoTyrantHandle              -- ^ Connection to Tokyo Tyrant
         -> IO (Either [Char] [LS.ByteString])
 misc handle funcname args opts = do
     let msg = runPut $ miscPut funcname args $ optOr opts
-    sent <- ttsend handle msg
+    ttsend handle msg
     rc <- ttrecv handle 1
     let rcp = parseCode rc
     case rcp of
