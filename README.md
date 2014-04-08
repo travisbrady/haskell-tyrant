@@ -8,6 +8,7 @@ Example
 
 A simple example assuming you've got ttserver running at the default location
     
+```haskell
     module Main where
 
     import Database.TokyoTyrant
@@ -29,3 +30,4 @@ A simple example assuming you've got ttserver running at the default location
         out conn k
         -- close connection to server
         closeConnection conn
+```
